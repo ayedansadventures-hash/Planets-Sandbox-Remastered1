@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Planets Sandbox 2.0</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Background layer (stars, nebula) rendered once or slowly updated -->
+    <canvas id="bgCanvas"></canvas>
+    <!-- Foreground layer (planets, trails, effects) rendered 60fps -->
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <header id="top-bar">
+            <div class="brand">
+                <h1>Planets Sandbox <span>2.0</span></h1>
+                <p>Interactive Gravity Simulation</p>
+            </div>
+            <div class="stats">
+                <div class="stat-box">
+                    <span class="label">SIM TIME</span>
+                    <span class="value" id="ui-time">0.0 yrs</span>
+                </div>
+                <div class="stat-box">
+                    <span class="label">BODIES</span>
+                    <span class="value" id="ui-bodies">0</span>
+                </div>
+            </div>
+        </header>
+
+        <aside id="side-panel">
+            <div class="panel-section">
+                <h2>Simulation</h2>
+                <div class="controls-row">
+                    <button id="btn-play" class="btn active">▶ Pause</button>
+                    <button id="btn-clear" class="btn danger">🗑 Clear Universe</button>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <label>Time Speed</label>
+                        <span id="ui-speed-val">10 days/s</span>
+                    </div>
+                    <!-- Exponential scale: 0 is 1 day/s -->
+                    <input type="range" id="ui-speed" min="0" max="100" step="1" value="33">
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>Creation Toolkit</h2>
+                <p class="hint">Select a body type. Click and drag in space to spawn it and set its velocity.</p>
+                <div class="spawn-grid" id="spawn-tools">
+                    <button class="spawn-btn active" data-type="rock">
+                        <div class="icon rock"></div>
+                        <span>Asteroid</span>
+                    </button>
+                    <button class="spawn-btn" data-type="earth">
+                        <div class="icon earth"></div>
+                        <span>Earth-like</span>
+                    </button>
+                    <button class="spawn-btn" data-type="gas">
+                        <div class="icon gas"></div>
+                        <span>Gas Giant</span>
+                    </button>
+                    <button class="spawn-btn" data-type="star">
+                        <div class="icon star"></div>
+                        <span>Star</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>Graphics & Display</h2>
+                <div class="toggle-group">
+                    <label class="toggle">
+                        <input type="checkbox" id="ui-trails" checked>
+                        <span class="slider"></span>
+                        <span class="text">Show Trails</span>
+                    </label>
+                    <label class="toggle">
+                        <input type="checkbox" id="ui-lighting" checked>
+                        <span class="slider"></span>
+                        <span class="text">Dynamic Lighting</span>
+                    </label>
+                    <label class="toggle">
+                        <input type="checkbox" id="ui-bloom" checked>
+                        <span class="slider"></span>
+                        <span class="text">Bloom & Glow</span>
+                    </label>
+                </div>
+                <button id="btn-recenter" class="btn secondary" style="width: 100%; margin-top: 15px;">⌖ Center Camera</button>
+            </div>
+        </aside>
+
+        <div id="selected-info" class="hidden">
+            <button id="btn-close-info">×</button>
+            <div class="info-header">
+                <h3 id="sel-name">Planet Name</h3>
+                <span id="sel-type">Type</span>
+            </div>
+            <div class="info-grid">
+                <div><span>Mass:</span> <strong id="sel-mass">1.0 M⊕</strong></div>
+                <div><span>Radius:</span> <strong id="sel-radius">6,371 km</strong></div>
+                <div><span>Temp:</span> <strong id="sel-temp">288 K</strong></div>
+                <div><span>Velocity:</span> <strong id="sel-vel">30 km/s</strong></div>
+            </div>
+            <button id="btn-delete-sel" class="btn danger" style="width:100%; margin-top:10px; padding: 6px;">Delete Body</button>
+        </div>
+        
+        <div id="toast-container"></div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="physics.js"></script>
+    <script src="renderer.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
