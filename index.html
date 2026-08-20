@@ -1,119 +1,279 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Planets Sandbox 2.0</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <!-- Background layer (stars, nebula) rendered once or slowly updated -->
-    <canvas id="bgCanvas"></canvas>
-    <!-- Foreground layer (planets, trails, effects) rendered 60fps -->
-    <canvas id="gameCanvas"></canvas>
-
-    <div id="ui-layer">
-        <header id="top-bar">
-            <div class="brand">
-                <h1>Planets Sandbox <span>2.0</span></h1>
-                <p>Interactive Gravity Simulation</p>
-            </div>
-            <div class="stats">
-                <div class="stat-box">
-                    <span class="label">SIM TIME</span>
-                    <span class="value" id="ui-time">0.0 yrs</span>
-                </div>
-                <div class="stat-box">
-                    <span class="label">BODIES</span>
-                    <span class="value" id="ui-bodies">0</span>
-                </div>
-            </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#050914" />
+    <title>Planets Sandbox</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=20260819_8" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-panel" id="controlPanel">
+        <header class="brand">
+          <img src="assets/solar-system-game-art.png" alt="" />
+          <div class="brand-shade"></div>
+          <button class="mobile-settings-close" id="closeSettings" aria-label="Close settings">×</button>
+          <div class="brand-copy">
+            <p class="eyebrow">INTERACTIVE GRAVITY LAB</p>
+            <h1>Planets<br /><span>Sandbox</span></h1>
+          </div>
         </header>
 
-        <aside id="side-panel">
-            <div class="panel-section">
-                <h2>Simulation</h2>
-                <div class="controls-row">
-                    <button id="btn-play" class="btn active">▶ Pause</button>
-                    <button id="btn-clear" class="btn danger">🗑 Clear Universe</button>
-                </div>
-                <div class="slider-group">
-                    <div class="slider-header">
-                        <label>Time Speed</label>
-                        <span id="ui-speed-val">10 days/s</span>
-                    </div>
-                    <!-- Exponential scale: 0 is 1 day/s -->
-                    <input type="range" id="ui-speed" min="0" max="100" step="1" value="33">
-                </div>
+        <div class="panel-scroll">
+          <section class="control-section">
+            <div class="section-heading">
+              <h2>System</h2>
+              <button class="icon-button" id="helpButton" title="Controls" aria-label="Show controls">?</button>
             </div>
+            <div class="field-row preset-row">
+              <select id="presetSelect" aria-label="Simulation preset">
+                <option value="solar">Solar System</option>
+                <option value="earthMoon">Earth &amp; Moon</option>
+                <option value="binary">Binary Stars</option>
+                <option value="chaos">Five-Body Chaos</option>
+                <option value="evolution">Evolution of the Solar System</option>
+              </select>
+              <button class="primary-button" id="loadPreset">Load</button>
+            </div>
+            <div class="button-grid">
+              <button id="addBody"><span>＋</span> New Planet</button>
+              <button id="toggleMoonsBtn" aria-pressed="true"><span>🌙</span> Moons: ON</button>
+              <button id="resetSimulation"><span>↺</span> Reset</button>
+              <button id="clearSimulation" class="danger-subtle"><span>×</span> Clear</button>
+              <button id="fitView"><span>⌗</span> Fit view</button>
+              <button id="moveBodyMode" aria-pressed="false"><span>✥</span> Move bodies</button>
+            </div>
+          </section>
 
-            <div class="panel-section">
-                <h2>Creation Toolkit</h2>
-                <p class="hint">Select a body type. Click and drag in space to spawn it and set its velocity.</p>
-                <div class="spawn-grid" id="spawn-tools">
-                    <button class="spawn-btn active" data-type="rock">
-                        <div class="icon rock"></div>
-                        <span>Asteroid</span>
-                    </button>
-                    <button class="spawn-btn" data-type="earth">
-                        <div class="icon earth"></div>
-                        <span>Earth-like</span>
-                    </button>
-                    <button class="spawn-btn" data-type="gas">
-                        <div class="icon gas"></div>
-                        <span>Gas Giant</span>
-                    </button>
-                    <button class="spawn-btn" data-type="star">
-                        <div class="icon star"></div>
-                        <span>Star</span>
-                    </button>
-                </div>
+          <section class="control-section">
+            <h2>Time &amp; physics</h2>
+            <div class="transport">
+              <button id="playPause" class="play-button" aria-label="Pause simulation">Ⅱ</button>
+              <div class="range-field grow">
+                <div class="range-label"><label for="timeScale">Simulation speed</label><output id="timeScaleValue">10 days/s</output></div>
+                <input id="timeScale" type="range" min="0" max="100" value="49" />
+              </div>
             </div>
+            <p class="physics-note"><strong>Collisions merge automatically.</strong> Objects inside a Roche limit are tidally shredded into ring-forming debris instead.</p>
+          </section>
 
-            <div class="panel-section">
-                <h2>Graphics & Display</h2>
-                <div class="toggle-group">
-                    <label class="toggle">
-                        <input type="checkbox" id="ui-trails" checked>
-                        <span class="slider"></span>
-                        <span class="text">Show Trails</span>
-                    </label>
-                    <label class="toggle">
-                        <input type="checkbox" id="ui-lighting" checked>
-                        <span class="slider"></span>
-                        <span class="text">Dynamic Lighting</span>
-                    </label>
-                    <label class="toggle">
-                        <input type="checkbox" id="ui-bloom" checked>
-                        <span class="slider"></span>
-                        <span class="text">Bloom & Glow</span>
-                    </label>
-                </div>
-                <button id="btn-recenter" class="btn secondary" style="width: 100%; margin-top: 15px;">⌖ Center Camera</button>
+          <section class="control-section">
+            <h2>Display</h2>
+            <div class="range-field">
+              <div class="range-label"><label for="trailLength">Trail length</label><output id="trailLengthValue">180</output></div>
+              <input id="trailLength" type="range" min="0" max="500" value="180" />
             </div>
+            <div class="toggle-grid">
+              <label><input id="showTrails" type="checkbox" checked /><span></span>Trails</label>
+              <label><input id="showLabels" type="checkbox" checked /><span></span>Labels</label>
+              <label><input id="showGrid" type="checkbox" checked /><span></span>Grid</label>
+              <label><input id="showVelocity" type="checkbox" /><span></span>Velocity</label>
+              <label><input id="showOrbits" type="checkbox" checked /><span></span>Orbits</label>
+            </div>
+          </section>
+
+          <section class="control-section">
+            <h2>AAA Visuals &amp; Audio</h2>
+            <div class="toggle-grid">
+              <label><input id="solarFlaresEnabled" type="checkbox" checked /><span></span>Solar Flares</label>
+              <label><input id="lensFlaresEnabled" type="checkbox" checked /><span></span>Lens Flares</label>
+              <label><input id="auroraEnabled" type="checkbox" checked /><span></span>Atmosphere &amp; Aurora</label>
+              <label><input id="audioEnabled" type="checkbox" checked /><span></span>Sound &amp; Drone</label>
+            </div>
+            <div class="field-row" style="margin-top: 10px;">
+              <button id="triggerFlareBtn" class="action-button" style="width: 100%; justify-content: center; gap: 8px;"><span>⚡</span> Erupt Solar Flare / CME</button>
+            </div>
+          </section>
+
+          <section class="control-section selected-section" id="selectedSection">
+            <div class="section-heading">
+              <h2>Selected body</h2>
+              <span class="selection-dot" id="selectionDot"></span>
+            </div>
+            <p class="empty-selection" id="emptySelection">Select a planet to inspect and change it.</p>
+            <div id="bodyEditor" hidden>
+              <label class="stacked-field">Name<input id="bodyName" type="text" maxlength="24" /></label>
+              <div class="field-row">
+                <label class="stacked-field grow">Mass <small>Earths</small><input id="bodyMass" type="number" min="0.0000000001" step="any" /></label>
+                <label class="stacked-field color-field">Color<input id="bodyColor" type="color" /></label>
+              </div>
+              <div class="field-row">
+                <label class="stacked-field">Velocity X <small>AU/yr</small><input id="bodyVelocityX" type="number" step="any" /></label>
+                <label class="stacked-field">Velocity Y <small>AU/yr</small><input id="bodyVelocityY" type="number" step="any" /></label>
+              </div>
+              <div class="range-field">
+                <div class="range-label"><label for="gravityScale">This body's gravity strength <small>0–100×</small></label><output id="gravityScaleValue">1.00×</output></div>
+                <input id="gravityScale" type="range" min="0" max="1000" value="100" />
+                <small class="control-help">At 0× this body neither pulls other objects nor gets pulled by them.</small>
+              </div>
+              <div class="field-row editor-actions">
+                <button id="focusBody">Focus camera</button>
+                <button id="deleteBody" class="danger-button">Delete</button>
+              </div>
+              <div class="science-card">
+                <div class="science-hero">
+                  <div class="planet-preview" id="planetPreview"></div>
+                  <div><small>CLASSIFICATION</small><strong id="bodyClass">Terrestrial planet</strong><span id="bodySummary">Rocky world</span></div>
+                </div>
+                <div class="science-grid">
+                  <div><small>COMPOSITION</small><strong id="bodyComposition">Silicate rock, iron</strong></div>
+                  <div><small>ATMOSPHERE</small><strong id="bodyAtmosphere">Trace gases</strong></div>
+                  <div><small>TEMPERATURE</small><strong id="bodyTemperature">15 °C</strong></div>
+                  <div><small>DENSITY</small><strong id="bodyDensity">5.5 g/cm³</strong></div>
+                  <div><small>RADIUS</small><strong id="bodyRadius">6,371 km</strong></div>
+                  <div><small>SURFACE GRAVITY</small><strong id="bodySurfaceGravity">1.00 g</strong></div>
+                  <div><small>ESCAPE VELOCITY</small><strong id="bodyEscapeVelocity">11.2 km/s</strong></div>
+                </div>
+                <div class="magnetic-field">
+                  <div><small>MAGNETIC FIELD</small><strong id="bodyMagneticValue">1.00× Earth</strong></div>
+                  <div class="range-field magnetic-control">
+                    <div class="range-label"><label for="magneticScale">Field multiplier <small>0–100× natural</small></label><output id="magneticScaleValue">1.00×</output></div>
+                    <input id="magneticScale" type="range" min="0" max="100" step="0.1" value="1" />
+                  </div>
+                  <div class="field-meter"><i id="bodyMagneticMeter"></i></div>
+                  <p id="bodyMagneticNote">A protective global magnetic field.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <main class="simulation-stage">
+        <canvas id="spaceCanvas" aria-label="Interactive planet simulation"></canvas>
+        <div class="top-hud">
+          <button class="mobile-panel-button" id="mobilePanelButton" aria-label="Open settings">☰</button>
+          <button class="new-planet-top" id="newPlanetTop"><span>＋</span> New Planet</button>
+          <div class="status-chip"><i></i><span id="runStatus">RUNNING</span></div>
+          <div class="hud-stat"><span>SIM TIME</span><strong id="simulationTime">0.00 years</strong></div>
+          <div class="hud-stat"><span>BODIES</span><strong id="bodyCount">0</strong></div>
+          <div class="hud-stat hide-small"><span>ZOOM</span><strong id="zoomValue">100%</strong></div>
+          <div class="hud-zoom-controls">
+            <button id="zoomInBtn" class="icon-hud-btn" title="Zoom In" aria-label="Zoom In">＋</button>
+            <button id="zoomOutBtn" class="icon-hud-btn" title="Zoom Out" aria-label="Zoom Out">－</button>
+            <button id="fitViewTopBtn" class="icon-hud-btn" title="Fit Entire System" aria-label="Fit Entire System">⛶</button>
+          </div>
+        </div>
+        <div class="scale-indicator"><span id="scaleBar"></span><label id="scaleLabel">1 AU</label></div>
+        <div class="mode-hint" id="modeHint" hidden>Choose an object and target from the New Planet menu · Esc to cancel</div>
+        <div class="toast" id="toast" role="status"></div>
+        <div class="canvas-credit">NASA/JPL imagery · visual sizes enhanced · physics uses true distances · Scroll to zoom</div>
+
+        <aside class="evolution-hud" id="evolutionHud" hidden>
+          <div class="evolution-header">
+            <div class="evolution-badge">TIMELAPSE PRESET</div>
+            <h3>Evolution of the Solar System</h3>
+            <button class="evolution-close" id="closeEvolutionHud" aria-label="Hide evolution panel">×</button>
+          </div>
+          <p class="evolution-description" id="evolutionDesc">
+            Solar Nebula &amp; Protoplanets. The young Sun is surrounded by a spinning protoplanetary disk of gas and planetesimals.
+          </p>
+          <div class="evolution-stepper" id="evolutionStepper">
+            <button class="evo-step active" data-step="0">
+              <span class="step-num">1</span>
+              <span class="step-name">4.57 Ga · Nebula</span>
+            </button>
+            <button class="evo-step" data-step="1">
+              <span class="step-num">2</span>
+              <span class="step-name">4.51 Ga · Theia Impact</span>
+            </button>
+            <button class="evo-step" data-step="2">
+              <span class="step-num">3</span>
+              <span class="step-name">4.40 Ga · Wet Venus &amp; Mars</span>
+            </button>
+            <button class="evo-step" data-step="3">
+              <span class="step-num">4</span>
+              <span class="step-name">4.20 Ga · 5 Giants Era</span>
+            </button>
+            <button class="evo-step" data-step="4">
+              <span class="step-num">5</span>
+              <span class="step-name">3.90 Ga · 5th Giant Ejection</span>
+            </button>
+            <button class="evo-step" data-step="5">
+              <span class="step-num">6</span>
+              <span class="step-name">2.40 Ga · Earth Terraforms</span>
+            </button>
+            <button class="evo-step" data-step="6">
+              <span class="step-num">7</span>
+              <span class="step-name">Present · Modern System</span>
+            </button>
+            <button class="evo-step" data-step="7">
+              <span class="step-num">8</span>
+              <span class="step-name">+5.00 Ga · Red Giant</span>
+            </button>
+          </div>
+          <div class="evolution-controls">
+            <button id="evoPrevBtn">◄ Prev Era</button>
+            <button id="evoPlayBtn" class="evo-play">▶ Auto-Play Eras</button>
+            <button id="evoNextBtn">Next Era ►</button>
+          </div>
         </aside>
 
-        <div id="selected-info" class="hidden">
-            <button id="btn-close-info">×</button>
-            <div class="info-header">
-                <h3 id="sel-name">Planet Name</h3>
-                <span id="sel-type">Type</span>
-            </div>
-            <div class="info-grid">
-                <div><span>Mass:</span> <strong id="sel-mass">1.0 M⊕</strong></div>
-                <div><span>Radius:</span> <strong id="sel-radius">6,371 km</strong></div>
-                <div><span>Temp:</span> <strong id="sel-temp">288 K</strong></div>
-                <div><span>Velocity:</span> <strong id="sel-vel">30 km/s</strong></div>
-            </div>
-            <button id="btn-delete-sel" class="btn danger" style="width:100%; margin-top:10px; padding: 6px;">Delete Body</button>
-        </div>
-        
-        <div id="toast-container"></div>
+        <aside class="launch-panel" id="launchPanel" aria-label="New planet launcher" aria-hidden="true" inert>
+          <div class="launch-header">
+            <div><p class="eyebrow">OBJECT CREATOR</p><h2>New Planet</h2></div>
+            <button id="closeLauncher" class="icon-button" aria-label="Close new planet menu">×</button>
+          </div>
+          <p class="launch-intro">Choose an object, select the X target slot, then launch an impactor, place an orbit, or create a binary pair.</p>
+          <div class="launch-mode" role="group" aria-label="Launch behavior">
+            <button id="autoOrbitMode" class="active" aria-pressed="true"><span>✦</span> Auto-Orbit</button>
+            <button id="impactMode" aria-pressed="false"><span>➤</span> Impact</button>
+            <button id="orbitMode" aria-pressed="false"><span>◉</span> Target</button>
+            <button id="binaryMode" aria-pressed="false"><span>∞</span> Binary</button>
+          </div>
+          <div class="spawn-types" id="spawnTypes">
+            <label class="spawn-card"><input type="radio" name="spawnType" value="asteroid" checked /><span class="spawn-orb asteroid-orb"></span><strong>Asteroid</strong><small>Small, rocky, fast</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="gasGiant" /><span class="spawn-orb gas-orb"></span><strong>Gas giant</strong><small>Massive, hydrogen-rich</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="planet" /><span class="spawn-orb earth-orb"></span><strong>Normal planet</strong><small>Rocky, Earth-like</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="hotPlanet" /><span class="spawn-orb hot-orb"></span><strong>Hot planet</strong><small>Molten, high energy</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="star" /><span class="spawn-orb star-orb"></span><strong>Sun or star</strong><small>Choose a stellar class</small></label>
+          </div>
+          <label class="stacked-field star-type-field" id="starTypeField" hidden>Star type
+            <select id="starType">
+              <option value="gStar">G-type · Sun-like</option>
+              <option value="redDwarf">M-type · Red dwarf</option>
+              <option value="blueStar">B-type · Blue main sequence</option>
+              <option value="redGiant">Red giant</option>
+              <option value="whiteDwarf">White dwarf</option>
+            </select>
+          </label>
+          <div class="target-heading"><div><small>X TARGET SLOT</small><strong>Orbit or impact this object</strong></div><span id="rosterCount">0 bodies</span></div>
+          <div class="system-roster" id="systemRoster"></div>
+          <div class="launch-options" id="impactOptions">
+            <label class="range-field"><div class="range-label"><span>Impact speed</span><output id="impactSpeedValue">Medium</output></div><input id="impactSpeed" type="range" min="1" max="3" value="2" /></label>
+          </div>
+          <div class="launch-options orbit-options" id="orbitOptions" hidden>
+            <label class="range-field"><div class="range-label"><span>Accentuary / Eccentricity</span><output id="eccentricityValue">0.00</output></div><input id="eccentricity" type="range" min="0" max="80" value="0" /></label>
+            <p class="option-help">0 is circular. Higher values bring the object close at periapsis and far away at apoapsis.</p>
+            <label class="stacked-field">Orbit direction<select id="orbitDirection"><option value="prograde">Prograde</option><option value="retrograde">Retrograde</option></select></label>
+            <div class="orbit-readout"><small>ORBIT DISTANCE</small><strong id="orbitDistanceValue">Move the mouse to choose</strong><span id="orbitRangeValue">Periapsis and apoapsis will appear on the canvas.</span></div>
+          </div>
+          <button class="launch-button" id="launchAtTarget" disabled><span>➤</span> Launch at selected target</button>
+          <p class="launch-note" id="launchNote">The object spawns just outside the target's orbit and automatically aims toward it.</p>
+        </aside>
+      </main>
     </div>
 
-    <!-- Scripts -->
-    <script src="physics.js"></script>
-    <script src="renderer.js"></script>
-    <script src="app.js"></script>
-</body>
+    <dialog id="helpDialog">
+      <button class="dialog-close" id="closeHelp" aria-label="Close">×</button>
+      <p class="eyebrow">FLIGHT MANUAL</p>
+      <h2>Explore your universe</h2>
+      <div class="shortcut-list">
+        <div><kbd>Drag</kbd><span>Move the camera</span></div>
+        <div><kbd>Scroll</kbd><span>Zoom toward the pointer</span></div>
+        <div><kbd>Click</kbd><span>Select and edit a body</span></div>
+        <div><kbd>Double-click</kbd><span>Focus a body</span></div>
+        <div><kbd>Space</kbd><span>Pause or continue time</span></div>
+        <div><kbd>A</kbd><span>Open the New Planet menu</span></div>
+        <div><kbd>T</kbd><span>Toggle Move Bodies, then drag a body</span></div>
+        <div><kbd>F</kbd><span>Fit the entire system</span></div>
+        <div><kbd>Esc</kbd><span>Cancel the current action</span></div>
+      </div>
+      <p class="dialog-note">Created by Ayedan in collaboration with OpenAI Codex &amp; Google DeepMind Antigravity AI.<br />Tip: Evolution of the Solar System preset shows the solar system's history from nebula to the 5th giant ejection, present day, and future red giant.</p>
+    </dialog>
+
+    <script src="app.js?v=20260819_8"></script>
+  </body>
 </html>
