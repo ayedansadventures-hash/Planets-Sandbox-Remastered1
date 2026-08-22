@@ -836,6 +836,45 @@
       state.bodies = [earth, moon];
       recenterSubsystem(state.bodies, { x: 0, y: 0, vx: 0, vy: 0 });
       state.camera = { x: 0, y: 0, zoom: 110000 };
+    
+    } else if (name === "blackHole") {
+      const gargantua = makeBody({
+        name: "Gargantua (Black Hole)",
+        mass: 1000000,
+        radius: .18,
+        radiusKm: 25000,
+        color: "#05070f",
+        texture: "blackHole",
+        scienceType: "blackHole",
+        isBlackHole: true,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0
+      });
+      state.bodies = [gargantua];
+      const companion = makeOrbiter(gargantua, { name: "Companion Blue Giant", mass: 350000, radius: .22, radiusKm: 850000, color: "#60a5fa", texture: "sun", distance: 4.8, eccentricity: 0.12 });
+      const pulsar = makeOrbiter(gargantua, { name: "Relativistic Pulsar", mass: 450000, radius: .06, radiusKm: 15, color: "#c084fc", texture: "whiteDwarf", distance: 2.2, eccentricity: 0.28 });
+      const oceanWorld = makeOrbiter(gargantua, { name: "Miller's Water World", mass: 1.4, radius: .062, radiusKm: 7500, color: "#38bdf8", texture: "earth", distance: 0.95, eccentricity: 0.015 });
+      state.bodies.push(companion, pulsar, oceanWorld);
+
+      for (let k = 0; k < 18; k++) {
+        const dist = 0.38 + (k / 18) * 0.45;
+        const p = makeOrbiter(gargantua, {
+          name: `Accretion Stream ${k+1}`,
+          mass: 0.00001,
+          radius: 0.018,
+          color: k % 2 === 0 ? "#f97316" : "#fbbf24",
+          texture: "rock",
+          distance: dist,
+          phase: (k / 18) * Math.PI * 2,
+          isMoon: true,
+          tidalImmune: true
+        });
+        state.bodies.push(p);
+      }
+      state.camera = { x: 0, y: 0, zoom: 42 };
+
     } else if (name === "binary") {
       const distance = 2.4;
       const speed = Math.sqrt(G * .7 / (distance * 2));
@@ -954,7 +993,7 @@
         const b = state.bodies[j];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const distSq = dx * dx + dy * dy + 1e-16;
+        const distSq = dx * dx + dy * dy + 1e-6;
         const invDist = 1 / Math.sqrt(distSq);
         const pairScale = (a.gravityScale ?? 1) * (b.gravityScale ?? 1);
         const factor = G * pairScale * invDist * invDist * invDist;
@@ -995,8 +1034,8 @@
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let distance = Math.hypot(dx, dy);
-        const colA = a.texture === "sun" ? Math.max(a.collisionRadius, a.radius * 0.85) : a.collisionRadius;
-        const colB = b.texture === "sun" ? Math.max(b.collisionRadius, b.radius * 0.85) : b.collisionRadius;
+        const colA = a.collisionRadius;
+        const colB = b.collisionRadius;
         const collisionDistance = colA + colB;
         const previousDx = (b.prevX ?? b.x) - (a.prevX ?? a.x);
         const previousDy = (b.prevY ?? b.y) - (a.prevY ?? a.y);
@@ -1016,7 +1055,8 @@
   function processRealisticImpact(a, b, distance) {
     const relVx = b.vx - a.vx;
     const relVy = b.vy - a.vy;
-    const relativeSpeedKmS = Math.hypot(relVx, relVy) * AU_YEAR_TO_KM_S;
+    const relSpeed = Math.hypot(relVx, relVy);
+    const relativeSpeedKmS = relSpeed * AU_YEAR_TO_KM_S;
     
     const dist = Math.max(distance, 1e-6);
     const crossProduct = Math.abs((b.x - a.x) * relVy - (b.y - a.y) * relVx);
@@ -1026,9 +1066,19 @@
     const primary = a.mass >= b.mass ? a : b;
     const impactor = primary === a ? b : a;
 
-    if (primary.texture === "sun") {
+    if (primary.texture === "sun" || primary.scienceType === "star" || primary.isBlackHole) {
       spawnImpactEffect(a, b, (a.x + b.x) / 2, (a.y + b.y) / 2);
-      mergeBodies(a, b, `STELLAR ENGULFMENT: ${primary.name} completely consumed ${impactor.name}!`);
+      mergeBodies(a, b, `${primary.isBlackHole ? "BLACK HOLE TIDAL DISRUPTION" : "STELLAR ENGULFMENT"}: ${primary.name} completely consumed ${impactor.name}!`);
+      return;
+    }
+
+    const combinedColRadius = Math.max(1e-6, a.collisionRadius + b.collisionRadius);
+    const vEsc = Math.sqrt(2 * G * (a.mass + b.mass) / combinedColRadius);
+    const availableSlots = MAX_BODIES - state.bodies.length;
+    const isHighSpeedFragmentation = (relSpeed >= vEsc * 1.35 || relativeSpeedKmS >= 12.0) && availableSlots >= 3 && primary.mass < impactor.mass * 80;
+
+    if (isHighSpeedFragmentation) {
+      fragmentCollision(a, b, vEsc, availableSlots);
       return;
     }
 
@@ -1042,6 +1092,109 @@
 
     spawnImpactEffect(a, b, (a.x + b.x) / 2, (a.y + b.y) / 2);
     mergeBodies(a, b, message);
+  }
+
+  function fragmentCollision(a, b, vEsc, availableSlots) {
+    const totalMass = a.mass + b.mass;
+    const comX = (a.x * a.mass + b.x * b.mass) / totalMass;
+    const comY = (a.y * a.mass + b.y * b.mass) / totalMass;
+    const comVx = (a.vx * a.mass + b.vx * b.mass) / totalMass;
+    const comVy = (a.vy * a.mass + b.vy * b.mass) / totalMass;
+
+    const survivor = a.mass >= b.mass ? a : b;
+    const destroyed = survivor === a ? b : a;
+
+    const numFragments = Math.min(Math.floor(4 + Math.random() * 5), availableSlots);
+    const coreFraction = 0.60 + Math.random() * 0.12;
+    const coreMass = totalMass * coreFraction;
+    const ejectaMass = totalMass - coreMass;
+
+    const rawWeights = Array.from({ length: numFragments }, () => 0.6 + Math.random() * 0.8);
+    const weightSum = rawWeights.reduce((s, w) => s + w, 0);
+    const fragmentMasses = rawWeights.map(w => (w / weightSum) * ejectaMass);
+
+    const baseColRadius = Math.cbrt(a.collisionRadius ** 3 + b.collisionRadius ** 3);
+    const baseVisRadius = Math.cbrt(a.radius ** 3 + b.radius ** 3);
+
+    survivor.mass = coreMass;
+    survivor.x = comX;
+    survivor.y = comY;
+    survivor.radius = Math.max(0.015, baseVisRadius * Math.cbrt(coreMass / totalMass));
+    survivor.collisionRadius = Math.max(1 / KM_PER_AU, baseColRadius * Math.cbrt(coreMass / totalMass));
+    survivor.referenceMass = survivor.mass;
+    survivor.referenceRadius = survivor.radius;
+    survivor.referenceCollisionRadius = survivor.collisionRadius;
+    survivor.name = `${survivor.name.split(" ")[0]} Core`;
+    survivor.trail = [];
+    survivor.tidalStress = 0;
+
+    const impactAngle = Math.atan2(b.y - a.y, b.x - a.x);
+    let sumEjectaMomX = 0;
+    let sumEjectaMomY = 0;
+    const newFragments = [];
+
+    for (let k = 0; k < numFragments; k++) {
+      const fMass = fragmentMasses[k];
+      const angle = impactAngle + (k / numFragments) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const kickSpeed = vEsc * (0.35 + Math.random() * 0.45);
+
+      const uX = Math.cos(angle) * kickSpeed;
+      const uY = Math.sin(angle) * kickSpeed;
+      sumEjectaMomX += fMass * uX;
+      sumEjectaMomY += fMass * uY;
+
+      const fRadius = Math.max(0.010, baseVisRadius * Math.cbrt(fMass / totalMass));
+      const fColRadius = Math.max(1 / KM_PER_AU, baseColRadius * Math.cbrt(fMass / totalMass));
+      const spawnDist = (survivor.collisionRadius + fColRadius) * (1.8 + Math.random() * 0.8);
+
+      const frag = makeBody({
+        name: `${survivor.name.split(" ")[0]} Fragment ${k + 1}`,
+        mass: fMass * EARTHS_PER_SUN,
+        radius: fRadius,
+        collisionRadius: fColRadius,
+        color: Math.random() > 0.4 ? survivor.color : destroyed.color,
+        texture: "rock",
+        scienceType: "asteroid",
+        x: comX + Math.cos(angle) * spawnDist,
+        y: comY + Math.sin(angle) * spawnDist,
+        vx: comVx + uX,
+        vy: comVy + uY,
+        parentId: survivor.parentId || survivor.id,
+        tidalImmune: true
+      });
+
+      newFragments.push(frag);
+    }
+
+    survivor.vx = comVx - (sumEjectaMomX / coreMass);
+    survivor.vy = comVy - (sumEjectaMomY / coreMass);
+
+    state.bodies.splice(state.bodies.indexOf(destroyed), 1);
+    for (const frag of newFragments) {
+      state.bodies.push(frag);
+    }
+
+    spawnImpactEffect(a, b, comX, comY);
+    for (let i = 0; i < 40; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = (0.08 + Math.random() * 0.35) * (vEsc * 0.4);
+      state.effects.push({
+        kind: "spark",
+        x: comX,
+        y: comY,
+        vx: comVx + Math.cos(ang) * spd,
+        vy: comVy + Math.sin(ang) * spd,
+        life: 1.5 + Math.random() * 1.8,
+        maxLife: 3.3,
+        size: 3 + Math.random() * 4,
+        color: "#ff8833"
+      });
+    }
+
+    refreshOrbitalRelationships();
+    updateSelectionUI();
+    renderSystemRoster();
+    toast(`CATASTROPHIC IMPACT: ${destroyed.name} shattered into ${numFragments} orbiting debris fragments!`, 5000);
   }
 
   function mergeBodies(a, b, message) {
@@ -1296,6 +1449,150 @@
     }
   }
 
+  
+  function triggerSupernova(targetStar) {
+    const star = targetStar || state.bodies.find(b => b.texture === "sun" || b.scienceType === "star") || selectedBody();
+    if (!star) {
+      toast("Select a star to detonate!");
+      return;
+    }
+
+    const x = star.x;
+    const y = star.y;
+    const initialMassSolar = star.mass;
+    const isHypermassive = initialMassSolar * EARTHS_PER_SUN >= 600000;
+    const isIntermediate = initialMassSolar * EARTHS_PER_SUN >= 180000;
+
+    let remnantName = `${star.name} (White Dwarf)`;
+    let remnantMassSolar = 0.55;
+    let remnantRadius = 0.075;
+    let remnantColor = "#e0f2fe";
+    let remnantTexture = "sun";
+    let remnantScience = "whiteDwarf";
+    let isBlackHole = false;
+
+    if (isHypermassive) {
+      remnantName = `${star.name} (Black Hole)`;
+      remnantMassSolar = initialMassSolar * 0.40;
+      remnantRadius = 0.12;
+      remnantColor = "#05070f";
+      remnantTexture = "blackHole";
+      remnantScience = "blackHole";
+      isBlackHole = true;
+    } else if (isIntermediate) {
+      remnantName = `${star.name} (Pulsar)`;
+      remnantMassSolar = 1.4;
+      remnantRadius = 0.045;
+      remnantColor = "#38bdf8";
+      remnantTexture = "sun";
+      remnantScience = "whiteDwarf";
+    }
+
+    const ejectaMassSolar = initialMassSolar - remnantMassSolar;
+
+    state.effects.push({ kind: "flash", x, y, life: 3.5, maxLife: 3.5, radius: 150, color: "#ffffff" });
+    state.effects.push({ kind: "shockwave", x, y, life: 4.5, maxLife: 4.5, radius: 15, growth: 260, color: "#ff3b30" });
+    state.effects.push({ kind: "shockwave", x, y, life: 3.8, maxLife: 3.8, radius: 8, growth: 180, color: "#38bdf8" });
+    state.effects.push({ kind: "shockwave", x, y, life: 3.2, maxLife: 3.2, radius: 4, growth: 120, color: "#ec4899" });
+
+    for (let i = 0; i < 90; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 0.8 + Math.random() * 3.5;
+      state.effects.push({
+        kind: "gas",
+        x,
+        y,
+        vx: star.vx + Math.cos(ang) * spd,
+        vy: star.vy + Math.sin(ang) * spd,
+        life: 4.5 + Math.random() * 4.5,
+        maxLife: 9.0,
+        size: 28 + Math.random() * 50,
+        color: ["#ff453a", "#bf5af2", "#5e5ce6", "#64d2ff", "#ffd60a"][i % 5]
+      });
+    }
+
+    star.mass = remnantMassSolar;
+    star.name = remnantName;
+    star.color = remnantColor;
+    star.radius = remnantRadius;
+    star.collisionRadius = isBlackHole ? 0.05 : 0.001;
+    star.referenceMass = star.mass;
+    star.referenceRadius = star.radius;
+    star.referenceCollisionRadius = star.collisionRadius;
+    star.texture = remnantTexture;
+    star.scienceType = remnantScience;
+    star.isBlackHole = isBlackHole;
+    star.prominences = [];
+    star.trail = [];
+
+    for (const body of state.bodies) {
+      if (body.id === star.id) continue;
+      const dx = body.x - x;
+      const dy = body.y - y;
+      const dist = Math.max(0.15, Math.hypot(dx, dy));
+      const kick = (0.28 * ejectaMassSolar) / (dist * dist * Math.max(0.001, body.mass));
+      body.vx += (dx / dist) * Math.min(kick, 8.0);
+      body.vy += (dy / dist) * Math.min(kick, 8.0);
+      if (dist < 3.5 && body.texture !== "sun") {
+        body.color = "#7f1d1d";
+        body.texture = "mars";
+        body.name = `Scorched ${body.name}`;
+      }
+    }
+
+    SoundEngine.playSupernova();
+    refreshOrbitalRelationships();
+    updateSelectionUI();
+    renderSystemRoster();
+    toast(`SUPERNOVA DETONATION: Core collapsed into ${remnantName}!`, 6000);
+  }
+
+  function createPlanetaryRingSystem(planet, style = "saturn", particleCount = 20) {
+    const targetPlanet = planet || selectedBody();
+    if (!targetPlanet) {
+      toast("Select a planet first to generate rings!");
+      return;
+    }
+
+    targetPlanet.ring = true;
+    targetPlanet.ringScale = 2.2;
+
+    const available = Math.max(0, MAX_BODIES - state.bodies.length);
+    const count = Math.min(available, particleCount);
+    const innerDist = targetPlanet.collisionRadius * 2.2;
+    const outerDist = targetPlanet.collisionRadius * 4.8;
+    const parentGravScale = targetPlanet.gravityScale ?? 1;
+
+    for (let i = 0; i < count; i++) {
+      const dist = innerDist + (i / count) * (outerDist - innerDist) + (Math.random() - 0.5) * 0.05;
+      const phase = (i / count) * Math.PI * 2 + Math.random() * 0.25;
+      const speed = Math.sqrt(G * parentGravScale * targetPlanet.mass / Math.max(dist, 1e-6));
+
+      const ringBody = makeBody({
+        name: `${targetPlanet.name} Ring Particle ${i + 1}`,
+        mass: 1e-7,
+        radius: 0.015,
+        collisionRadius: 20 / KM_PER_AU,
+        color: i % 2 === 0 ? "#e2d3b4" : "#c4b595",
+        texture: "rock",
+        scienceType: "asteroid",
+        x: targetPlanet.x + Math.cos(phase) * dist,
+        y: targetPlanet.y + Math.sin(phase) * dist,
+        vx: targetPlanet.vx - Math.sin(phase) * speed,
+        vy: targetPlanet.vy + Math.cos(phase) * speed,
+        parentId: targetPlanet.id,
+        isMoon: true,
+        tidalImmune: true
+      });
+      state.bodies.push(ringBody);
+    }
+
+    SoundEngine.playOrbitPlacement();
+    updateSelectionUI();
+    renderSystemRoster();
+    toast(`Spawned dynamic ring system of orbiting particles around ${targetPlanet.name}!`, 4500);
+  }
+
   function triggerSolarFlare(targetStar) {
     const star = targetStar || state.bodies.find((b) => b.texture === "sun" || b.scienceType === "star") || state.bodies[0];
     if (!star) return;
@@ -1344,9 +1641,7 @@
   function updateSimulation(realSeconds, wallSeconds = realSeconds) {
     if (!state.running || state.speedDays <= 0 || !state.bodies.length) return;
     const requestedDt = realSeconds * state.speedDays * DAY_TO_YEAR;
-    
-    // Determine dynamic max sub-steps based on requested speed
-    const maxSteps = state.speedDays >= 100 ? 15 : state.speedDays >= 30 ? 25 : 45;
+
 
     const shortestPeriod = state.bodies.reduce((shortest, body) => {
       if (!body.orbit || body.isMoon) return shortest;
@@ -1356,13 +1651,26 @@
       return Math.min(shortest, period);
     }, Infinity);
 
+    const minStarDist = state.bodies.reduce((minD, b) => {
+      for (const star of state.bodies) {
+        if (star.id === b.id) continue;
+        if (star.texture === "sun" || star.scienceType === "star" || star.isBlackHole) {
+          const dist = Math.hypot(b.x - star.x, b.y - star.y);
+          if (dist < minD) minD = dist;
+        }
+      }
+      return minD;
+    }, Infinity);
+
     const encounterStep = closestEncounterStep();
+    const closeScale = minStarDist < 0.6 ? Math.max(0.12, minStarDist / 0.6) : 1.0;
     const accuracyStep = Math.min(
-      .002 * DAY_TO_YEAR,
-      Number.isFinite(shortestPeriod) ? shortestPeriod / 60 : Infinity,
+      .001 * DAY_TO_YEAR * closeScale,
+      Number.isFinite(shortestPeriod) ? (shortestPeriod / 75) * closeScale : Infinity,
       Number.isFinite(encounterStep) ? encounterStep : Infinity,
     );
 
+    const maxSteps = state.speedDays >= 300 ? 60 : state.speedDays >= 100 ? 45 : state.speedDays >= 30 ? 30 : 50;
     const steps = Math.min(maxSteps, Math.max(1, Math.ceil(requestedDt / accuracyStep)));
     const dt = requestedDt / steps;
     const detailedTrails = state.trailLength > 0 && state.speedDays >= 50;
@@ -1704,6 +2012,43 @@
       ctx.scale(1 + body.tidalStress * .95, Math.max(.48, 1 - body.tidalStress * .42));
     }
     drawMagnetosphere(body, radius);
+
+    if (body.isBlackHole || body.texture === "blackHole") {
+      // Einstein Ring / Gravitational Lensing Halo
+      const lensRadius = radius * 3.4;
+      const lensGrad = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, lensRadius);
+      lensGrad.addColorStop(0, "rgba(255, 165, 0, 0.95)");
+      lensGrad.addColorStop(0.25, "rgba(255, 100, 20, 0.65)");
+      lensGrad.addColorStop(0.55, "rgba(96, 165, 250, 0.35)");
+      lensGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = lensGrad;
+      ctx.beginPath(); ctx.arc(0, 0, lensRadius, 0, Math.PI * 2); ctx.fill();
+
+      // Relativistic Accretion Disk (elliptical Doppler beamed ring)
+      ctx.save();
+      ctx.rotate(-0.35);
+      ctx.scale(1, 0.32);
+      const diskGrad = ctx.createRadialGradient(0, 0, radius * 1.2, 0, 0, radius * 3.8);
+      diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+      diskGrad.addColorStop(0.35, "rgba(251, 146, 60, 0.85)");
+      diskGrad.addColorStop(0.75, "rgba(239, 68, 68, 0.45)");
+      diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = diskGrad;
+      ctx.beginPath(); ctx.arc(0, 0, radius * 3.8, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      // Pitch Black Event Horizon
+      ctx.fillStyle = "#000000";
+      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
+
+      // Photon Sphere Ring
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     if (body.texture === "sun" || body.scienceType === "star") {
       const glow = ctx.createRadialGradient(0, 0, radius * .3, 0, 0, radius * 3.2);
       glow.addColorStop(0, rgbaColor(body.color, 0.55));
@@ -2098,7 +2443,7 @@
         ctx.lineWidth = Math.max(1, effect.size * .45);
         ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - effect.vx * 28, p.y - effect.vy * 28); ctx.stroke();
       } else {
-        ctx.translate(p.x, p.y); ctx.rotate(effect.rotation);
+        ctx.translate(p.x, p.y); if (effect.rotation != null && !Number.isNaN(effect.rotation)) ctx.rotate(effect.rotation);
         ctx.fillStyle = effect.color;
         ctx.fillRect(-effect.size / 2, -effect.size / 3, effect.size, effect.size * .66);
       }
@@ -2211,7 +2556,17 @@
 
   function drawMoveGuide() {
     const body = state.bodies.find((candidate) => candidate.id === state.grabbedBodyId);
-    if (!body) return;
+    if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
     const point = bodyDisplayPoint(body);
     const radius = visualRadius(body);
     const parent = body.parentId ? state.bodies.find((candidate) => candidate.id === body.parentId) : null;
@@ -2334,7 +2689,17 @@
     ui.bodyEditor.hidden = !body;
     ui.selectionDot.style.background = body?.color || "#43516a";
     ui.selectionDot.style.color = body?.color || "#43516a";
-    if (!body) return;
+    if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
     ui.bodyName.value = body.name;
     ui.bodyMass.value = formatNumber(body.mass * EARTHS_PER_SUN, 5);
     ui.bodyColor.value = normalizeHex(body.color);
@@ -2417,7 +2782,17 @@
   }
 
   function focusBody(body = selectedBody()) {
-    if (!body) return;
+    if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
     state.followBodyId = body.id;
     state.camera.x = body.x;
     state.camera.y = body.y;
@@ -2609,7 +2984,7 @@
 
     state.bodies.push(newBody);
     refreshOrbitalRelationships();
-    createEffect("shockwave", spawnX, spawnY, { color: newBody.color, radius: newBody.radius * 2.5 });
+    state.effects.push({ kind: "shockwave", x: spawnX, y: spawnY, life: 1.5, maxLife: 1.5, radius: 6, growth: 55, color: newBody.color });
     SoundEngine.playOrbitPlacement();
     selectBody(newBody);
     renderSystemRoster();
@@ -2982,7 +3357,17 @@
 
   function moveGrabbedBody(screenX, screenY) {
     const body = state.bodies.find((candidate) => candidate.id === state.grabbedBodyId);
-    if (!body) return;
+    if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
     const dx = (screenX - state.grabScreenX) / state.camera.zoom;
     const dy = (screenY - state.grabScreenY) / state.camera.zoom;
     state.grabScreenX = screenX;
@@ -3189,13 +3574,33 @@
     });
     ui.gravityScale.addEventListener("input", () => {
       const body = selectedBody();
-      if (!body) return;
+      if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
       body.gravityScale = (Number(ui.gravityScale.value) / 100) ** 2;
       updateSelectionUI();
     });
     ui.magneticScale.addEventListener("input", () => {
       const body = selectedBody();
-      if (!body) return;
+      if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
       body.magneticScale = clamp(Number(ui.magneticScale.value), 0, 100);
       updateSelectionUI();
     });
@@ -3211,6 +3616,21 @@
     ui.audioEnabled?.addEventListener("change", () => {
       state.audioEnabled = ui.audioEnabled.checked;
       SoundEngine.toggleMute(!state.audioEnabled);
+    });
+
+    
+    ui.triggerSupernovaGlobalBtn?.addEventListener("click", () => {
+      triggerSupernova();
+    });
+
+    ui.triggerSupernovaBtn?.addEventListener("click", () => {
+      const body = selectedBody();
+      if (body) triggerSupernova(body);
+    });
+
+    ui.generateRingsBtn?.addEventListener("click", () => {
+      const body = selectedBody();
+      if (body) createPlanetaryRingSystem(body);
     });
 
     ui.triggerFlareBtn?.addEventListener("click", () => {
@@ -3244,7 +3664,17 @@
     ui.focusBody.addEventListener("click", () => focusBody());
     ui.deleteBody.addEventListener("click", () => {
       const body = selectedBody();
-      if (!body) return;
+      if (!body) {
+      if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = "none";
+      if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = "none";
+      return;
+    }
+
+    const isStarOrGiant = body && (body.texture === "sun" || body.scienceType === "star" || body.mass * EARTHS_PER_SUN > 15000);
+    const isPlanetOrGiant = body && !isStarOrGiant && !body.isBlackHole;
+    if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
+    if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
+
       state.bodies = state.bodies.filter((item) => item.id !== body.id);
       if (state.followBodyId === body.id) state.followBodyId = null;
       state.selectedId = null;

@@ -34,6 +34,7 @@
                 <option value="binary">Binary Stars</option>
                 <option value="chaos">Five-Body Chaos</option>
                 <option value="evolution">Evolution of the Solar System</option>
+                <option value="blackHole">Black Hole &amp; Accretion Disk</option>
               </select>
               <button class="primary-button" id="loadPreset">Load</button>
             </div>
@@ -84,6 +85,7 @@
             </div>
             <div class="field-row" style="margin-top: 10px;">
               <button id="triggerFlareBtn" class="action-button" style="width: 100%; justify-content: center; gap: 8px;"><span>⚡</span> Erupt Solar Flare / CME</button>
+              <button id="triggerSupernovaGlobalBtn" class="action-button" style="width: 100%; justify-content: center; gap: 8px; margin-top: 8px;"><span>💥</span> Supernova Core Collapse</button>
             </div>
           </section>
 
@@ -107,6 +109,10 @@
                 <div class="range-label"><label for="gravityScale">This body's gravity strength <small>0–100×</small></label><output id="gravityScaleValue">1.00×</output></div>
                 <input id="gravityScale" type="range" min="0" max="1000" value="100" />
                 <small class="control-help">At 0× this body neither pulls other objects nor gets pulled by them.</small>
+              </div>
+              <div class="field-row editor-actions">
+                <button id="triggerSupernovaBtn" class="action-button" style="display: none; width: 100%; justify-content: center; gap: 6px; margin-bottom: 6px;"><span>💥</span> Detonate Supernova</button>
+                <button id="generateRingsBtn" class="secondary-button" style="display: none; width: 100%; justify-content: center; gap: 6px; margin-bottom: 6px;"><span>🪐</span> Generate Rings</button>
               </div>
               <div class="field-row editor-actions">
                 <button id="focusBody">Focus camera</button>
