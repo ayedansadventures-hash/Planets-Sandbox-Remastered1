@@ -1545,10 +1545,39 @@
         const dx = body.x - p.x;
         const dy = body.y - p.y;
         const dist = Math.hypot(dx, dy);
-        const magnetosphereDist = (body.collisionRadius || 0.001) * (2.0 + Math.sqrt(body.magneticScale ?? 1) * 3.5);
+        const magScale = Math.max(0, body.magneticScale ?? 1);
+        const magnetosphereDist = (body.collisionRadius || 0.001) * (1.8 + Math.sqrt(magScale) * 3.8);
 
         if (dist <= magnetosphereDist) {
-          body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.45);
+          // Magnetic Shielding calculation: Strong field deflects, weak/no field absorbs heat & radiation
+          const shielding = clamp(Math.sqrt(magScale) / 1.6, 0, 0.98);
+          const unshieldedFraction = 1.0 - shielding;
+
+          // Auroras triggered on shielded magnetosphere
+          body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.35 + shielding * 0.45);
+
+          // Thermal Heating & Radium/Radiation absorption for unshielded fraction
+          if (unshieldedFraction > 0.02) {
+            body.temperatureKelvin = (body.temperatureKelvin || 288) + 24.0 * unshieldedFraction;
+            body.radiumDose = (body.radiumDose || 0.12) + 5.5 * unshieldedFraction;
+            
+            // Spawn impact thermal sparks
+            if (Math.random() < 0.4) {
+              const spd = 0.1 + Math.random() * 0.3;
+              state.effects.push({
+                kind: "spark",
+                x: p.x,
+                y: p.y,
+                vx: (p.vx * 0.2) + (Math.random() - 0.5) * spd,
+                vy: (p.vy * 0.2) + (Math.random() - 0.5) * spd,
+                life: 0.8 + Math.random() * 0.8,
+                maxLife: 1.6,
+                size: 2.0 + Math.random() * 2.5,
+                color: body.temperatureKelvin > 1200 ? "#ff4500" : "#ffaa33"
+              });
+            }
+          }
+
           p.life = 0;
           break;
         }
@@ -2177,29 +2206,61 @@
   }
 
   function drawMagnetosphere(body, radius) {
-    const strength = clamp(body.magneticScale ?? 1, 0, 100);
-    if (state.hoveredId !== body.id || strength <= 0) return;
-    const reach = radius * (1.45 + Math.sqrt(strength) * .58);
-    const opacity = .12 + Math.log10(strength + 1) / Math.log10(101) * .3;
+    const strength = Math.max(0, body.magneticScale ?? 1);
+    if (strength <= 0.05) return;
+    const isSelected = state.selectedId === body.id || state.hoveredId === body.id;
+    const reach = radius * (1.6 + Math.sqrt(strength) * 1.8);
+    const opacity = isSelected ? clamp(0.25 + Math.log10(strength + 1) * 0.25, 0.2, 0.85) : clamp(0.08 + Math.log10(strength + 1) * 0.12, 0.08, 0.45);
+
+    // Find nearest star to orient the day-side bow shock and night-side magnetotail
+    const star = state.bodies.find(b => (b.texture === "sun" || b.scienceType === "star") && b.id !== body.id) || state.bodies[0];
+    let starAngle = 0;
+    if (star && star.id !== body.id) {
+      starAngle = Math.atan2(star.y - body.y, star.x - body.x);
+    }
+
     ctx.save();
-    ctx.rotate(-.18);
-    ctx.globalCompositeOperation = "screen";
-    ctx.shadowColor = "rgba(72,157,255,.8)";
-    ctx.shadowBlur = Math.min(28, reach * .2);
-    for (let index = 0; index < 4; index++) {
-      const scale = .58 + index * .14;
-      ctx.strokeStyle = `rgba(72,157,255,${opacity * (1 - index * .13)})`;
-      ctx.lineWidth = Math.max(.7, 1.5 - index * .18);
+    ctx.rotate(starAngle);
+
+    // 1. Day-side Compressed Bow Shock
+    ctx.strokeStyle = `rgba(56, 189, 248, ${opacity * 0.9})`;
+    ctx.lineWidth = isSelected ? 2.0 : 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, reach * 0.75, -Math.PI * 0.45, Math.PI * 0.45);
+    ctx.stroke();
+
+    // 2. Night-side Extended Magnetotail
+    ctx.strokeStyle = `rgba(99, 102, 241, ${opacity * 0.6})`;
+    ctx.beginPath();
+    ctx.moveTo(0, reach * 0.75);
+    ctx.quadraticCurveTo(-reach * 1.5, reach * 0.5, -reach * 2.4, reach * 0.2);
+    ctx.moveTo(0, -reach * 0.75);
+    ctx.quadraticCurveTo(-reach * 1.5, -reach * 0.5, -reach * 2.4, -reach * 0.2);
+    ctx.stroke();
+
+    // 3. Dipole Field Loops
+    ctx.save();
+    ctx.rotate(Math.PI * 0.5); // align with planetary poles
+    for (let index = 0; index < 3; index++) {
+      const loopScale = 0.55 + index * 0.22;
+      ctx.strokeStyle = `rgba(147, 197, 253, ${opacity * (0.8 - index * 0.18)})`;
+      ctx.lineWidth = Math.max(0.7, 1.4 - index * 0.2);
       ctx.beginPath();
-      ctx.ellipse(0, 0, reach * scale, reach * scale * .48, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, reach * loopScale, reach * loopScale * 0.5, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
+    ctx.restore();
+
+    // 4. Volumetric Magnetopause Plasma Glow
     const glow = ctx.createRadialGradient(0, 0, radius, 0, 0, reach);
-    glow.addColorStop(0, "rgba(67,151,255,.16)");
-    glow.addColorStop(.52, `rgba(58,139,255,${opacity * .28})`);
-    glow.addColorStop(1, "rgba(37,116,255,0)");
+    glow.addColorStop(0, `rgba(56, 189, 248, ${opacity * 0.35})`);
+    glow.addColorStop(0.5, `rgba(99, 102, 241, ${opacity * 0.18})`);
+    glow.addColorStop(1, "rgba(37, 99, 235, 0)");
     ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.ellipse(0, 0, reach, reach * .52, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, reach, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.restore();
   }
 
@@ -2208,8 +2269,8 @@
     if (!state.showAccretionDisk) {
       ctx.fillStyle = "#000000";
       ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.lineWidth = 1.6;
       ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
       return;
     }
@@ -2223,20 +2284,51 @@
     const innerRadius = radius * 1.15;
     const outerRadius = radius * (2.4 + diskScale * 0.65);
 
-    // 1. Outer Concentric Diffuse Gas Atmosphere (Full 360° Circular Glow centered at 0,0)
+    // 1. Dual Relativistic Polar Plasma Jets (Blandford-Znajek Relativistic Beams)
+    const jetLength = radius * (4.5 + diskScale * 1.2);
+    const jetWidth = radius * 0.28;
+    ctx.save();
+    for (const sign of [-1, 1]) {
+      const jetGrad = ctx.createLinearGradient(0, 0, 0, sign * jetLength);
+      jetGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      jetGrad.addColorStop(0.2, isBlueFeed ? "rgba(56, 189, 248, 0.9)" : "rgba(251, 146, 60, 0.9)");
+      jetGrad.addColorStop(0.6, "rgba(168, 85, 247, 0.65)");
+      jetGrad.addColorStop(1, "rgba(147, 51, 234, 0)");
+
+      ctx.fillStyle = jetGrad;
+      ctx.beginPath();
+      ctx.moveTo(-jetWidth * 0.5, 0);
+      ctx.lineTo(jetWidth * 0.5, 0);
+      ctx.lineTo(jetWidth * 1.8, sign * jetLength);
+      ctx.lineTo(-jetWidth * 1.8, sign * jetLength);
+      ctx.closePath();
+      ctx.fill();
+
+      // Relativistic jet shock knots
+      for (let k = 1; k <= 3; k++) {
+        const knotY = sign * (jetLength * (0.25 * k));
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.beginPath();
+        ctx.arc(0, knotY, jetWidth * (0.6 + k * 0.2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // 2. Einstein Gravitational Lensing Halo (Warped Spacetime Corona)
     ctx.save();
     const diffuseHalo = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius * 1.35);
     if (isBlueFeed) {
       diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      diffuseHalo.addColorStop(0.18, "rgba(186, 230, 253, 0.88)");
-      diffuseHalo.addColorStop(0.48, "rgba(56, 189, 248, 0.55)");
-      diffuseHalo.addColorStop(0.78, "rgba(99, 102, 241, 0.22)");
+      diffuseHalo.addColorStop(0.18, "rgba(186, 230, 253, 0.9)");
+      diffuseHalo.addColorStop(0.48, "rgba(56, 189, 248, 0.6)");
+      diffuseHalo.addColorStop(0.78, "rgba(99, 102, 241, 0.25)");
       diffuseHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
     } else {
       diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      diffuseHalo.addColorStop(0.18, "rgba(251, 191, 36, 0.88)");
-      diffuseHalo.addColorStop(0.48, "rgba(234, 88, 12, 0.55)");
-      diffuseHalo.addColorStop(0.78, "rgba(168, 85, 247, 0.22)");
+      diffuseHalo.addColorStop(0.18, "rgba(251, 191, 36, 0.9)");
+      diffuseHalo.addColorStop(0.48, "rgba(234, 88, 12, 0.6)");
+      diffuseHalo.addColorStop(0.78, "rgba(168, 85, 247, 0.25)");
       diffuseHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
     }
     ctx.fillStyle = diffuseHalo;
@@ -2245,20 +2337,20 @@
     ctx.fill();
     ctx.restore();
 
-    // 2. High-Density Swirling Gas Accretion Disk (Full 360° Circular Ring centered at 0,0)
+    // 3. Multi-Band Swirling Gas Accretion Disk (360° Circular Keplerian Ring)
     ctx.save();
     const diskGrad = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius);
     if (isBlueFeed) {
       diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      diskGrad.addColorStop(0.2, "rgba(224, 242, 254, 0.92)");
-      diskGrad.addColorStop(0.55, "rgba(56, 189, 248, 0.82)");
-      diskGrad.addColorStop(0.85, "rgba(99, 102, 241, 0.45)");
+      diskGrad.addColorStop(0.18, "rgba(224, 242, 254, 0.95)");
+      diskGrad.addColorStop(0.5, "rgba(56, 189, 248, 0.85)");
+      diskGrad.addColorStop(0.82, "rgba(99, 102, 241, 0.48)");
       diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
     } else {
       diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      diskGrad.addColorStop(0.2, "rgba(254, 215, 170, 0.92)");
-      diskGrad.addColorStop(0.55, "rgba(249, 115, 22, 0.82)");
-      diskGrad.addColorStop(0.85, "rgba(168, 85, 247, 0.45)");
+      diskGrad.addColorStop(0.18, "rgba(254, 215, 170, 0.95)");
+      diskGrad.addColorStop(0.5, "rgba(249, 115, 22, 0.85)");
+      diskGrad.addColorStop(0.82, "rgba(168, 85, 247, 0.48)");
       diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
     }
     ctx.fillStyle = diskGrad;
@@ -2267,15 +2359,25 @@
     ctx.arc(0, 0, innerRadius, Math.PI * 2, 0, true);
     ctx.closePath();
     ctx.fill();
+
+    // Swirling Keplerian Filament Rings
+    for (let rK = 1; rK <= 3; rK++) {
+      const ringR = innerRadius + (outerRadius - innerRadius) * (rK / 4);
+      ctx.strokeStyle = isBlueFeed ? "rgba(255, 255, 255, 0.4)" : "rgba(254, 240, 138, 0.4)";
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
 
-    // 3. Central Event Horizon (Pitch Black Singularity Sphere)
+    // 4. Central Event Horizon (Pure Black Singularity Void)
     ctx.fillStyle = "#000000";
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
 
-    // 4. Luminous White Photon Sphere Ring (1.5 Rs)
+    // 5. White-Hot Photon Sphere Halo (1.5 Rs)
     ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 2.0;
     ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
   }
 
@@ -2343,6 +2445,35 @@
     ctx.save();
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.clip();
     if (!drawNasaTexture(body, radius)) drawTexture(body, radius);
+
+    // Render dynamic Thermal Heating, Molten Magma, & Radium Glow on overheated planets
+    if (body.temperatureKelvin && body.temperatureKelvin > 550 && body.texture !== "sun" && body.texture !== "blackHole") {
+      const heatFactor = clamp((body.temperatureKelvin - 550) / 1800, 0, 1.0);
+      const heatGrad = ctx.createRadialGradient(-radius * 0.25, -radius * 0.25, radius * 0.1, 0, 0, radius * 1.02);
+      if (body.temperatureKelvin > 2000) {
+        // Super-Hot Incandescent Plasma World
+        heatGrad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+        heatGrad.addColorStop(0.3, "rgba(254, 240, 138, 0.85)");
+        heatGrad.addColorStop(0.7, "rgba(249, 115, 22, 0.75)");
+        heatGrad.addColorStop(1, "rgba(220, 38, 38, 0.9)");
+      } else if (body.temperatureKelvin > 1100) {
+        // Molten Lava World
+        heatGrad.addColorStop(0, "rgba(254, 215, 170, 0.85)");
+        heatGrad.addColorStop(0.4, "rgba(249, 115, 22, 0.75)");
+        heatGrad.addColorStop(0.8, "rgba(185, 28, 28, 0.8)");
+        heatGrad.addColorStop(1, "rgba(69, 10, 10, 0.85)");
+      } else {
+        // Scorched Desert / Thermal Stress
+        heatGrad.addColorStop(0, "rgba(251, 146, 60, 0.45)");
+        heatGrad.addColorStop(0.6, "rgba(194, 65, 12, 0.35)");
+        heatGrad.addColorStop(1, "rgba(124, 45, 18, 0.5)");
+      }
+      ctx.fillStyle = heatGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
     drawAtmosphereAndAurora(body, radius);
     if (body.ring) drawRing(body, radius, false);
