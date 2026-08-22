@@ -844,7 +844,7 @@
       recenterSubsystem(state.bodies, { x: 0, y: 0, vx: 0, vy: 0 });
       state.camera = { x: 0, y: 0, zoom: 110000 };
     
-    } else if (name === "blackHole") {
+        } else if (name === "blackHole") {
       const gargantua = makeBody({
         name: "Gargantua (Black Hole)",
         mass: 1000000,
@@ -860,12 +860,41 @@
         vy: 0
       });
       state.bodies = [gargantua];
-      const companion = makeOrbiter(gargantua, { name: "Companion Blue Giant", mass: 350000, radius: .22, radiusKm: 850000, color: "#60a5fa", texture: "sun", distance: 4.8, eccentricity: 0.12 });
-      const pulsar = makeOrbiter(gargantua, { name: "Relativistic Pulsar", mass: 450000, radius: .06, radiusKm: 15, color: "#c084fc", texture: "whiteDwarf", distance: 2.2, eccentricity: 0.28 });
-      const oceanWorld = makeOrbiter(gargantua, { name: "Miller's Water World", mass: 1.4, radius: .062, radiusKm: 7500, color: "#38bdf8", texture: "earth", distance: 0.95, eccentricity: 0.015 });
+      const companion = makeOrbiter(gargantua, {
+        name: "Companion Blue Giant",
+        mass: 350000,
+        radius: .24,
+        radiusKm: 850000,
+        color: "#60a5fa",
+        naturalColor: "#60a5fa",
+        texture: "blueStar",
+        scienceType: "blueStar",
+        distance: 4.6,
+        eccentricity: 0.10
+      });
+      const pulsar = makeOrbiter(gargantua, {
+        name: "Relativistic Pulsar",
+        mass: 450000,
+        radius: .06,
+        radiusKm: 15,
+        color: "#c084fc",
+        texture: "whiteDwarf",
+        scienceType: "whiteDwarf",
+        distance: 2.2,
+        eccentricity: 0.25
+      });
+      const oceanWorld = makeOrbiter(gargantua, {
+        name: "Miller's Planet",
+        mass: 1.4,
+        radius: .055,
+        radiusKm: 7500,
+        color: "#38bdf8",
+        texture: "earth",
+        scienceType: "planet",
+        distance: 0.65,
+        eccentricity: 0.012
+      });
       state.bodies.push(companion, pulsar, oceanWorld);
-
-// Clean 4-body system for maximum 60 FPS performance without particle lag
       state.camera = { x: 0, y: 0, zoom: 42 };
 
     } else if (name === "binary") {
@@ -2054,7 +2083,6 @@
 
         const bhPoint = worldToScreen(blackHole.x, blackHole.y);
         const starPoint = worldToScreen(body.x, body.y);
-        const bhRadius = visualRadius(blackHole);
         const starRadius = visualRadius(body);
 
         const dx = starPoint.x - bhPoint.x;
@@ -2063,18 +2091,18 @@
         if (dist < 5) continue;
 
         const midAngle = Math.atan2(dy, dx) - 0.45;
-        const ctrlX = bhPoint.x + Math.cos(midAngle) * (dist * 0.65);
-        const ctrlY = bhPoint.y + Math.sin(midAngle) * (dist * 0.65);
+        const ctrlX = bhPoint.x + Math.cos(midAngle) * (dist * 0.6);
+        const ctrlY = bhPoint.y + Math.sin(midAngle) * (dist * 0.6);
 
         ctx.save();
         const streamGrad = ctx.createLinearGradient(starPoint.x, starPoint.y, bhPoint.x, bhPoint.y);
-        streamGrad.addColorStop(0, rgbaColor(body.color, 0.9));
-        streamGrad.addColorStop(0.35, "rgba(251, 146, 60, 0.85)");
-        streamGrad.addColorStop(0.75, "rgba(239, 68, 68, 0.9)");
-        streamGrad.addColorStop(1, "rgba(168, 85, 247, 0.95)");
+        streamGrad.addColorStop(0, rgbaColor(body.color, 0.95));
+        streamGrad.addColorStop(0.4, "rgba(56, 189, 248, 0.88)");
+        streamGrad.addColorStop(0.8, "rgba(99, 102, 241, 0.75)");
+        streamGrad.addColorStop(1, "rgba(255, 255, 255, 0.95)");
 
         ctx.strokeStyle = streamGrad;
-        ctx.lineWidth = Math.max(3, starRadius * 0.7);
+        ctx.lineWidth = Math.max(3, starRadius * 0.6);
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(starPoint.x, starPoint.y);
@@ -2082,30 +2110,11 @@
         ctx.stroke();
 
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = Math.max(1, starRadius * 0.25);
+        ctx.lineWidth = Math.max(1, starRadius * 0.2);
         ctx.beginPath();
         ctx.moveTo(starPoint.x, starPoint.y);
         ctx.quadraticCurveTo(ctrlX, ctrlY, bhPoint.x, bhPoint.y);
         ctx.stroke();
-
-        const ringRadius = Math.max(bhRadius * 2.8, dist * 0.45);
-        const ringGrad = ctx.createRadialGradient(bhPoint.x, bhPoint.y, bhRadius * 1.1, bhPoint.x, bhPoint.y, ringRadius);
-        ringGrad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-        ringGrad.addColorStop(0.2, "rgba(251, 146, 60, 0.75)");
-        ringGrad.addColorStop(0.55, rgbaColor(body.color, 0.55));
-        ringGrad.addColorStop(0.85, "rgba(168, 85, 247, 0.35)");
-        ringGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-
-        ctx.save();
-        ctx.translate(bhPoint.x, bhPoint.y);
-        ctx.rotate(-0.35);
-        ctx.scale(1, 0.35);
-        ctx.fillStyle = ringGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
         ctx.restore();
       }
     }
@@ -2177,68 +2186,134 @@
       return;
     }
 
-    const diskTilt = -0.32;
-    const diskScaleY = 0.28;
-    const outerRadius = radius * 3.6;
-    const innerRadius = radius * 1.25;
+    // Determine disk gas composition & spectral temperature based on nearby star
+    const feedingStar = state.bodies.find(b => b.eatingBlackHoleId === body.id) || 
+                        state.bodies.find(b => (b.texture === "sun" || b.scienceType === "star" || b.scienceType === "blueStar") && Math.hypot(b.x - body.x, b.y - body.y) < 18);
+    
+    const isBlueFeed = feedingStar && (feedingStar.scienceType === "blueStar" || feedingStar.color === "#60a5fa" || feedingStar.color === "#87bdff" || feedingStar.name.includes("Blue"));
 
-    // 1. Back of the Lensing Halo (Upper Arc bent over top of event horizon)
+    const innerRadius = radius * 1.25;
+    const outerRadius = radius * 3.8;
+    const diskTilt = -0.32;
+    const diskScaleY = 0.30;
+
+    // Detect planets passing through the accretion disk to carve out orbital furrows / dents
+    const planetsInDisk = [];
+    for (const p of state.bodies) {
+      if (p.id === body.id || p.id === feedingStar?.id) continue;
+      const distWorld = Math.hypot(p.x - body.x, p.y - body.y);
+      const distScreen = distWorld * state.camera.zoom;
+      if (distScreen >= innerRadius * 0.7 && distScreen <= outerRadius * 1.3) {
+        const pAngle = Math.atan2(p.y - body.y, p.x - body.x) - diskTilt;
+        const hillRadiusScreen = Math.max(3.5, distScreen * Math.cbrt(p.mass / Math.max(body.mass * 3, 1e-6)) * 2.5);
+        planetsInDisk.push({
+          distScreen,
+          angle: pAngle,
+          hillRadiusScreen
+        });
+      }
+    }
+
+    // 1. Gravitational Lensing Halo (Upper Arc bent over the top of the Event Horizon)
     ctx.save();
-    const upperHalo = ctx.createRadialGradient(0, -radius * 0.12, radius * 0.92, 0, -radius * 0.12, outerRadius * 0.95);
-    upperHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-    upperHalo.addColorStop(0.18, "rgba(251, 146, 60, 0.85)");
-    upperHalo.addColorStop(0.5, "rgba(234, 88, 12, 0.6)");
-    upperHalo.addColorStop(0.82, "rgba(147, 51, 234, 0.25)");
-    upperHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    const upperHalo = ctx.createRadialGradient(0, -radius * 0.12, radius * 0.94, 0, -radius * 0.12, outerRadius * 0.95);
+    if (isBlueFeed) {
+      upperHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      upperHalo.addColorStop(0.18, "rgba(186, 230, 253, 0.92)");
+      upperHalo.addColorStop(0.48, "rgba(56, 189, 248, 0.65)");
+      upperHalo.addColorStop(0.78, "rgba(99, 102, 241, 0.32)");
+      upperHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    } else {
+      upperHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      upperHalo.addColorStop(0.18, "rgba(251, 191, 36, 0.92)");
+      upperHalo.addColorStop(0.48, "rgba(234, 88, 12, 0.65)");
+      upperHalo.addColorStop(0.78, "rgba(168, 85, 247, 0.3)");
+      upperHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    }
     ctx.fillStyle = upperHalo;
     ctx.beginPath();
     ctx.arc(0, 0, outerRadius * 0.95, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    // 2. Back half of the equatorial accretion disk
-    ctx.save();
-    ctx.rotate(diskTilt);
-    ctx.scale(1, diskScaleY);
-    const backDisk = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius);
-    backDisk.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-    backDisk.addColorStop(0.25, "rgba(251, 191, 36, 0.85)");
-    backDisk.addColorStop(0.65, "rgba(239, 68, 68, 0.55)");
-    backDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = backDisk;
-    ctx.beginPath();
-    ctx.arc(0, 0, outerRadius, Math.PI, Math.PI * 2);
-    ctx.arc(0, 0, innerRadius, Math.PI * 2, Math.PI, true);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    // Helper to render half of the gas disk with planetary gap carving
+    function renderGasDiskHalf(isFront) {
+      ctx.save();
+      ctx.rotate(diskTilt);
+      ctx.scale(1, diskScaleY);
+
+      const diskGrad = ctx.createRadialGradient(isFront ? -radius * 0.45 : 0, 0, innerRadius, 0, 0, outerRadius);
+      if (isBlueFeed) {
+        diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+        diskGrad.addColorStop(0.2, isFront ? "rgba(186, 230, 253, 0.95)" : "rgba(147, 197, 253, 0.85)");
+        diskGrad.addColorStop(0.55, isFront ? "rgba(56, 189, 248, 0.82)" : "rgba(37, 99, 235, 0.6)");
+        diskGrad.addColorStop(0.85, "rgba(99, 102, 241, 0.3)");
+        diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      } else {
+        diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+        diskGrad.addColorStop(0.2, isFront ? "rgba(254, 215, 170, 0.95)" : "rgba(251, 191, 36, 0.85)");
+        diskGrad.addColorStop(0.55, isFront ? "rgba(249, 115, 22, 0.82)" : "rgba(234, 88, 12, 0.6)");
+        diskGrad.addColorStop(0.85, "rgba(168, 85, 247, 0.3)");
+        diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      }
+
+      ctx.fillStyle = diskGrad;
+      ctx.beginPath();
+      if (isFront) {
+        ctx.arc(0, 0, outerRadius, 0, Math.PI);
+        ctx.arc(0, 0, innerRadius, Math.PI, 0, true);
+      } else {
+        ctx.arc(0, 0, outerRadius, Math.PI, Math.PI * 2);
+        ctx.arc(0, 0, innerRadius, Math.PI * 2, Math.PI, true);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Carve out planetary orbital gap / dent where planet passed
+      for (const item of planetsInDisk) {
+        const pAngleNorm = (item.angle % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+        const isAngleInHalf = isFront ? (pAngleNorm >= 0 && pAngleNorm <= Math.PI) : (pAngleNorm >= Math.PI && pAngleNorm <= Math.PI * 2);
+
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.88)";
+        ctx.lineWidth = item.hillRadiusScreen * 1.5;
+        ctx.beginPath();
+        if (isFront) {
+          ctx.arc(0, 0, item.distScreen, 0, Math.PI);
+        } else {
+          ctx.arc(0, 0, item.distScreen, Math.PI, Math.PI * 2);
+        }
+        ctx.stroke();
+
+        if (isAngleInHalf) {
+          const dentX = Math.cos(item.angle) * item.distScreen;
+          const dentY = Math.sin(item.angle) * item.distScreen;
+          ctx.fillStyle = "rgba(0, 0, 0, 0.96)";
+          ctx.beginPath();
+          ctx.arc(dentX, dentY, item.hillRadiusScreen * 2.0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    // 2. Back Half of Equatorial Disk
+    renderGasDiskHalf(false);
 
     // 3. Central Pitch-Black Event Horizon
     ctx.fillStyle = "#000000";
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
 
     // 4. White-Hot Photon Sphere Ring (1.5 Rs)
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
     ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.arc(0, 0, radius * 1.04, 0, Math.PI * 2); ctx.stroke();
 
-    // 5. Front half of the equatorial accretion disk with Doppler beaming
-    ctx.save();
-    ctx.rotate(diskTilt);
-    ctx.scale(1, diskScaleY);
-    const frontDisk = ctx.createRadialGradient(-radius * 0.5, 0, innerRadius * 0.8, 0, 0, outerRadius);
-    frontDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-    frontDisk.addColorStop(0.2, "rgba(254, 215, 170, 0.95)");
-    frontDisk.addColorStop(0.5, "rgba(249, 115, 22, 0.8)");
-    frontDisk.addColorStop(0.85, "rgba(168, 85, 247, 0.35)");
-    frontDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = frontDisk;
-    ctx.beginPath();
-    ctx.arc(0, 0, outerRadius, 0, Math.PI);
-    ctx.arc(0, 0, innerRadius, Math.PI, 0, true);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    // 5. Front Half of Equatorial Disk (with Doppler beaming)
+    renderGasDiskHalf(true);
   }
 
   function drawBody(body) {
@@ -2258,6 +2333,31 @@
     if (body.isBlackHole || body.texture === "blackHole") {
       drawGargantuaBlackHole(body, radius);
       ctx.restore();
+      return;
+    }
+
+    
+    if (body.scienceType === "blueStar" || (body.name.includes("Blue") && (body.texture === "sun" || body.scienceType === "star" || body.texture === "blueStar"))) {
+      const coreGrad = ctx.createRadialGradient(-radius * 0.25, -radius * 0.25, radius * 0.05, 0, 0, radius * 1.05);
+      coreGrad.addColorStop(0, "#ffffff");
+      coreGrad.addColorStop(0.2, "#e0f2fe");
+      coreGrad.addColorStop(0.5, "#60a5fa");
+      coreGrad.addColorStop(0.85, "#2563eb");
+      coreGrad.addColorStop(1, "#1e3a8a");
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
+
+      const corona = ctx.createRadialGradient(0, 0, radius * 0.6, 0, 0, radius * 3.5);
+      corona.addColorStop(0, "rgba(96, 165, 250, 0.75)");
+      corona.addColorStop(0.3, "rgba(56, 189, 248, 0.4)");
+      corona.addColorStop(0.7, "rgba(37, 99, 235, 0.15)");
+      corona.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = corona;
+      ctx.beginPath(); ctx.arc(0, 0, radius * 3.5, 0, Math.PI * 2); ctx.fill();
+
+      drawSolarProminences(body, radius);
+      ctx.restore();
+      if (state.showVelocity) drawVelocity(body, p);
       return;
     }
 
