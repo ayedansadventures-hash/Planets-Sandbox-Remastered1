@@ -218,6 +218,7 @@
     solarFlaresEnabled: true,
     lensFlaresEnabled: true,
     auroraEnabled: true,
+    showAccretionDisk: true,
     audioEnabled: true,
     flareCooldown: 2.0,
     cmeParticles: [],
@@ -864,21 +865,7 @@
       const oceanWorld = makeOrbiter(gargantua, { name: "Miller's Water World", mass: 1.4, radius: .062, radiusKm: 7500, color: "#38bdf8", texture: "earth", distance: 0.95, eccentricity: 0.015 });
       state.bodies.push(companion, pulsar, oceanWorld);
 
-      for (let k = 0; k < 18; k++) {
-        const dist = 0.38 + (k / 18) * 0.45;
-        const p = makeOrbiter(gargantua, {
-          name: `Accretion Stream ${k+1}`,
-          mass: 0.00001,
-          radius: 0.018,
-          color: k % 2 === 0 ? "#f97316" : "#fbbf24",
-          texture: "rock",
-          distance: dist,
-          phase: (k / 18) * Math.PI * 2,
-          isMoon: true,
-          tidalImmune: true
-        });
-        state.bodies.push(p);
-      }
+// Clean 4-body system for maximum 60 FPS performance without particle lag
       state.camera = { x: 0, y: 0, zoom: 42 };
 
     } else if (name === "binary") {
@@ -1288,6 +1275,8 @@
       for (let j = state.bodies.length - 1; j >= 0; j--) {
         const victim = state.bodies[j];
         if (victim.id === blackHole.id) continue;
+        const isStarOrGiant = victim.texture === "sun" || victim.scienceType === "star" || (victim.scienceType === "gasGiant" && victim.mass * EARTHS_PER_SUN >= 30);
+        if (!isStarOrGiant) continue; // Only stars & massive gas giants feed accretion streams!
 
         const dx = victim.x - blackHole.x;
         const dy = victim.y - blackHole.y;
@@ -2056,6 +2045,7 @@
 
   
   function drawStellarAccretionStreams() {
+    if (!state.showAccretionDisk) return;
     for (const blackHole of state.bodies) {
       if (!blackHole.isBlackHole && blackHole.texture !== "blackHole") continue;
 
@@ -2176,6 +2166,81 @@
     ctx.restore();
   }
 
+  
+  function drawGargantuaBlackHole(body, radius) {
+    if (!state.showAccretionDisk) {
+      ctx.fillStyle = "#000000";
+      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
+      return;
+    }
+
+    const diskTilt = -0.32;
+    const diskScaleY = 0.28;
+    const outerRadius = radius * 3.6;
+    const innerRadius = radius * 1.25;
+
+    // 1. Back of the Lensing Halo (Upper Arc bent over top of event horizon)
+    ctx.save();
+    const upperHalo = ctx.createRadialGradient(0, -radius * 0.12, radius * 0.92, 0, -radius * 0.12, outerRadius * 0.95);
+    upperHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+    upperHalo.addColorStop(0.18, "rgba(251, 146, 60, 0.85)");
+    upperHalo.addColorStop(0.5, "rgba(234, 88, 12, 0.6)");
+    upperHalo.addColorStop(0.82, "rgba(147, 51, 234, 0.25)");
+    upperHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = upperHalo;
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius * 0.95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 2. Back half of the equatorial accretion disk
+    ctx.save();
+    ctx.rotate(diskTilt);
+    ctx.scale(1, diskScaleY);
+    const backDisk = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius);
+    backDisk.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+    backDisk.addColorStop(0.25, "rgba(251, 191, 36, 0.85)");
+    backDisk.addColorStop(0.65, "rgba(239, 68, 68, 0.55)");
+    backDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = backDisk;
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius, Math.PI, Math.PI * 2);
+    ctx.arc(0, 0, innerRadius, Math.PI * 2, Math.PI, true);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Central Pitch-Black Event Horizon
+    ctx.fillStyle = "#000000";
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
+
+    // 4. White-Hot Photon Sphere Ring (1.5 Rs)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 0, radius * 1.04, 0, Math.PI * 2); ctx.stroke();
+
+    // 5. Front half of the equatorial accretion disk with Doppler beaming
+    ctx.save();
+    ctx.rotate(diskTilt);
+    ctx.scale(1, diskScaleY);
+    const frontDisk = ctx.createRadialGradient(-radius * 0.5, 0, innerRadius * 0.8, 0, 0, outerRadius);
+    frontDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+    frontDisk.addColorStop(0.2, "rgba(254, 215, 170, 0.95)");
+    frontDisk.addColorStop(0.5, "rgba(249, 115, 22, 0.8)");
+    frontDisk.addColorStop(0.85, "rgba(168, 85, 247, 0.35)");
+    frontDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = frontDisk;
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius, 0, Math.PI);
+    ctx.arc(0, 0, innerRadius, Math.PI, 0, true);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawBody(body) {
     const p = bodyDisplayPoint(body);
     const radius = visualRadius(body);
@@ -2191,37 +2256,7 @@
     drawMagnetosphere(body, radius);
 
     if (body.isBlackHole || body.texture === "blackHole") {
-      // Einstein Ring / Gravitational Lensing Halo
-      const lensRadius = radius * 3.4;
-      const lensGrad = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, lensRadius);
-      lensGrad.addColorStop(0, "rgba(255, 165, 0, 0.95)");
-      lensGrad.addColorStop(0.25, "rgba(255, 100, 20, 0.65)");
-      lensGrad.addColorStop(0.55, "rgba(96, 165, 250, 0.35)");
-      lensGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = lensGrad;
-      ctx.beginPath(); ctx.arc(0, 0, lensRadius, 0, Math.PI * 2); ctx.fill();
-
-      // Relativistic Accretion Disk (elliptical Doppler beamed ring)
-      ctx.save();
-      ctx.rotate(-0.35);
-      ctx.scale(1, 0.32);
-      const diskGrad = ctx.createRadialGradient(0, 0, radius * 1.2, 0, 0, radius * 3.8);
-      diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      diskGrad.addColorStop(0.35, "rgba(251, 146, 60, 0.85)");
-      diskGrad.addColorStop(0.75, "rgba(239, 68, 68, 0.45)");
-      diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = diskGrad;
-      ctx.beginPath(); ctx.arc(0, 0, radius * 3.8, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-
-      // Pitch Black Event Horizon
-      ctx.fillStyle = "#000000";
-      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
-
-      // Photon Sphere Ring
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
+      drawGargantuaBlackHole(body, radius);
       ctx.restore();
       return;
     }
@@ -3794,7 +3829,7 @@
       ui.trailLengthValue.value = state.trailLength;
       for (const body of state.bodies) if (body.trail.length > state.trailLength) body.trail.splice(0, body.trail.length - state.trailLength);
     });
-    [["showTrails", "showTrails"], ["showLabels", "showLabels"], ["showGrid", "showGrid"], ["showVelocity", "showVelocity"], ["showOrbits", "showOrbits"], ["solarFlaresEnabled", "solarFlaresEnabled"], ["lensFlaresEnabled", "lensFlaresEnabled"], ["auroraEnabled", "auroraEnabled"]].forEach(([id, property]) => {
+    [["showTrails", "showTrails"], ["showLabels", "showLabels"], ["showGrid", "showGrid"], ["showVelocity", "showVelocity"], ["showOrbits", "showOrbits"], ["solarFlaresEnabled", "solarFlaresEnabled"], ["lensFlaresEnabled", "lensFlaresEnabled"], ["auroraEnabled", "auroraEnabled"], ["showAccretionDisk", "showAccretionDisk"]].forEach(([id, property]) => {
       if (ui[id]) ui[id].addEventListener("change", () => { state[property] = ui[id].checked; });
     });
 
