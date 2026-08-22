@@ -273,6 +273,7 @@
     gasGiant: { className: "Gas giant", summary: "Massive hydrogen-rich world", composition: "Hydrogen, helium, dense core", atmosphere: "Hydrogen and helium", temperature: "−120 °C cloud tops", density: "1.2 g/cm³", magnetic: 9, magneticLabel: "~9× Earth", magneticNote: "Conductive metallic hydrogen powers a vast magnetosphere." },
     planet: { className: "Terrestrial planet", summary: "Rocky Earth-class world", composition: "Silicate mantle, iron core", atmosphere: "Nitrogen, CO₂, water vapor", temperature: "18 °C average", density: "5.2 g/cm³", magnetic: .8, magneticLabel: "0.80× Earth", magneticNote: "A rotating liquid core sustains a protective global field." },
     hotPlanet: { className: "Lava planet", summary: "Molten high-energy world", composition: "Molten silicates, iron core", atmosphere: "Rock vapor, sodium, oxygen", temperature: "1,400 °C", density: "5.8 g/cm³", magnetic: .25, magneticLabel: "0.25× Earth", magneticNote: "Heat and tidal forces create an unstable magnetic field." },
+    blackHole: { className: "Singularity", summary: "Supermassive gravitational singularity", composition: "Pure mass-energy at infinite density", atmosphere: "Photon sphere and event horizon", temperature: "~0 K (Hawking radiation)", density: "Infinite singularity", magnetic: 50, magneticLabel: "Extreme relativistic", magneticNote: "Generates powerful relativistic accretion jets and frame-dragging." },
     star: { className: "Main-sequence star", summary: "Self-luminous fusion body", composition: "Hydrogen and helium plasma", atmosphere: "Photosphere and corona", temperature: "5,000 °C surface", density: "1.4 g/cm³", magnetic: 6, magneticLabel: "Strong and variable", magneticNote: "Plasma circulation creates a changing stellar field." },
     ice: { className: "Ice giant", summary: "Cold volatile-rich world", composition: "Water, methane, ammonia ices", atmosphere: "Hydrogen, helium, methane", temperature: "−190 °C", density: "1.5 g/cm³", magnetic: .6, magneticLabel: "0.60× Earth", magneticNote: "An offset dynamo creates a tilted magnetosphere." },
     rock: { className: "Rocky body", summary: "Airless terrestrial object", composition: "Silicate rock and iron", atmosphere: "Trace gases", temperature: "Variable", density: "4.1 g/cm³", magnetic: .08, magneticLabel: "0.08× Earth", magneticNote: "Only a weak remnant or induced field is present." },
@@ -284,6 +285,7 @@
     planet: { label: "New planet", mass: 1, radius: .055, collisionRadius: EARTH_RADIUS_AU, color: "#4d9fe8", texture: "earth", scienceType: "planet" },
     hotPlanet: { label: "Hot planet", mass: 2.5, radius: .064, collisionRadius: 8500 / KM_PER_AU, color: "#f05b38", texture: "mars", scienceType: "hotPlanet" },
     star: { label: "Star", mass: 332946, radius: .19, collisionRadius: 696340 / KM_PER_AU, color: "#ffb13b", texture: "sun", scienceType: "star" },
+    blackHole: { label: "Black Hole", mass: 332946 * 3.5, radius: .14, collisionRadius: 15000 / KM_PER_AU, color: "#05070f", texture: "blackHole", scienceType: "blackHole", isBlackHole: true },
   };
 
   const starCatalog = {
@@ -392,6 +394,8 @@
       science: data.science || scienceByName[data.name] || null,
       parentId: data.parentId || null,
       isMoon: Boolean(data.isMoon),
+      isBlackHole: Boolean(data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
+      accretionDisk: Boolean(data.accretionDisk || data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
       tidalImmune: Boolean(data.tidalImmune),
       tidalStress: clamp(data.tidalStress ?? 0, 0, 1),
       tidalPrimaryId: data.tidalPrimaryId ?? null,
@@ -429,6 +433,8 @@
       vy: parent.vy + Math.cos(angle) * speed * direction,
       parentId: parent.id,
       isMoon: Boolean(data.isMoon),
+      isBlackHole: Boolean(data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
+      accretionDisk: Boolean(data.accretionDisk || data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
       orbit: { parentId: parent.id, a: semiMajor, e: eccentricity, angle, direction },
     });
   }
@@ -1274,6 +1280,65 @@
   }
 
   function resolveTidalDisruptions(dt) {
+
+    // Black Hole Tidal Disruption & Stellar Feeding Stream
+    for (const blackHole of state.bodies) {
+      if (!blackHole.isBlackHole && blackHole.texture !== "blackHole") continue;
+
+      for (let j = state.bodies.length - 1; j >= 0; j--) {
+        const victim = state.bodies[j];
+        if (victim.id === blackHole.id) continue;
+
+        const dx = victim.x - blackHole.x;
+        const dy = victim.y - blackHole.y;
+        const dist = Math.hypot(dx, dy);
+        const tdeRadius = Math.max(blackHole.radius * 24, 2.8 * Math.cbrt(blackHole.mass / Math.max(victim.mass, 1e-12)) * victim.radius);
+        
+        if (dist < tdeRadius && dist > blackHole.collisionRadius) {
+          victim.isBeingEaten = true;
+          victim.eatingBlackHoleId = blackHole.id;
+          blackHole.isFeeding = true;
+          blackHole.feedingTargetId = victim.id;
+
+          const siphonedMass = victim.mass * 0.012 * (1.0 - dist / tdeRadius) * (dt * 365.25);
+          
+          if (siphonedMass > 0 && victim.mass > siphonedMass) {
+            victim.mass -= siphonedMass;
+            blackHole.mass += siphonedMass * 0.85;
+            blackHole.accretionGlow = clamp((blackHole.accretionGlow || 1.0) + 0.08, 1.0, 4.0);
+            blackHole.accretionDisk = true;
+
+            if (Math.random() < 0.85) {
+              const t = Math.random();
+              const streamAngle = Math.atan2(dy, dx) + t * Math.PI * 1.4;
+              const streamDist = blackHole.radius * 1.2 + t * (dist - blackHole.radius * 1.2);
+              const px = blackHole.x + Math.cos(streamAngle) * streamDist;
+              const py = blackHole.y + Math.sin(streamAngle) * streamDist;
+
+              state.effects.push({
+                kind: "stream_particle",
+                x: px,
+                y: py,
+                vx: -Math.sin(streamAngle) * (0.8 / Math.sqrt(streamDist)) - Math.cos(streamAngle) * 0.15,
+                vy: Math.cos(streamAngle) * (0.8 / Math.sqrt(streamDist)) - Math.sin(streamAngle) * 0.15,
+                life: 0.8 + Math.random() * 0.6,
+                maxLife: 1.4,
+                size: 2.0 + Math.random() * 3.5,
+                color: victim.color || "#ffaa33"
+              });
+            }
+          } else if (victim.mass <= siphonedMass * 2 || dist <= blackHole.collisionRadius * 1.5) {
+            spawnImpactEffect(blackHole, victim, (blackHole.x + victim.x) / 2, (blackHole.y + victim.y) / 2);
+            mergeBodies(blackHole, victim, `TIDAL DISRUPTION: ${blackHole.name} completely devoured ${victim.name}!`);
+            break;
+          }
+        } else if (victim.eatingBlackHoleId === blackHole.id && dist >= tdeRadius) {
+          victim.isBeingEaten = false;
+          victim.eatingBlackHoleId = null;
+        }
+      }
+    }
+
     const elapsedDays = dt * 365.25;
     for (const body of state.bodies) {
       if (body.tidalImmune || !body.tidalStress) continue;
@@ -1450,6 +1515,51 @@
   }
 
   
+  
+  function crushIntoBlackHole(targetBody) {
+    const body = targetBody || selectedBody();
+    if (!body) { toast("Select an object to crush into a black hole!"); return; }
+    if (body.isBlackHole) { toast("Object is already a black hole singularity!"); return; }
+
+    SoundEngine.playSupernova();
+
+    state.effects.push({ kind: "flash", x: body.x, y: body.y, life: 2.2, maxLife: 2.2, radius: visualRadius(body) * 6, color: "#ffffff" });
+    state.effects.push({ kind: "shockwave", x: body.x, y: body.y, life: 2.5, maxLife: 2.5, radius: visualRadius(body) * 4, growth: -35, color: "#38bdf8" });
+    
+    for (let i = 0; i < 45; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 0.4 + Math.random() * 1.6;
+      state.effects.push({
+        kind: "spark",
+        x: body.x + Math.cos(ang) * (body.radius * 1.5),
+        y: body.y + Math.sin(ang) * (body.radius * 1.5),
+        vx: -Math.cos(ang) * spd,
+        vy: -Math.sin(ang) * spd,
+        life: 1.2 + Math.random() * 1.0,
+        maxLife: 2.2,
+        size: 2.5 + Math.random() * 3.5,
+        color: "#60a5fa"
+      });
+    }
+
+    body.name = `${body.name} (Black Hole)`;
+    body.color = "#05070f";
+    body.naturalColor = "#05070f";
+    body.texture = "blackHole";
+    body.scienceType = "blackHole";
+    body.isBlackHole = true;
+    body.accretionDisk = true;
+    body.radius = Math.max(0.045, Math.min(0.18, body.radius * 0.45));
+    body.collisionRadius = Math.max(150 / KM_PER_AU, body.collisionRadius * 0.1);
+    body.referenceRadius = body.radius;
+    body.referenceCollisionRadius = body.collisionRadius;
+    body.magneticScale = 50;
+
+    updateSelectionUI();
+    renderSystemRoster();
+    toast(`GRAVITATIONAL COLLAPSE: ${body.name} was crushed into a black hole!`, 5500);
+  }
+
   function triggerSupernova(targetStar) {
     const star = targetStar || state.bodies.find(b => b.texture === "sun" || b.scienceType === "star") || selectedBody();
     if (!star) {
@@ -1944,6 +2054,73 @@
     }
   }
 
+  
+  function drawStellarAccretionStreams() {
+    for (const blackHole of state.bodies) {
+      if (!blackHole.isBlackHole && blackHole.texture !== "blackHole") continue;
+
+      for (const body of state.bodies) {
+        if (body.eatingBlackHoleId !== blackHole.id) continue;
+
+        const bhPoint = worldToScreen(blackHole.x, blackHole.y);
+        const starPoint = worldToScreen(body.x, body.y);
+        const bhRadius = visualRadius(blackHole);
+        const starRadius = visualRadius(body);
+
+        const dx = starPoint.x - bhPoint.x;
+        const dy = starPoint.y - bhPoint.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 5) continue;
+
+        const midAngle = Math.atan2(dy, dx) - 0.45;
+        const ctrlX = bhPoint.x + Math.cos(midAngle) * (dist * 0.65);
+        const ctrlY = bhPoint.y + Math.sin(midAngle) * (dist * 0.65);
+
+        ctx.save();
+        const streamGrad = ctx.createLinearGradient(starPoint.x, starPoint.y, bhPoint.x, bhPoint.y);
+        streamGrad.addColorStop(0, rgbaColor(body.color, 0.9));
+        streamGrad.addColorStop(0.35, "rgba(251, 146, 60, 0.85)");
+        streamGrad.addColorStop(0.75, "rgba(239, 68, 68, 0.9)");
+        streamGrad.addColorStop(1, "rgba(168, 85, 247, 0.95)");
+
+        ctx.strokeStyle = streamGrad;
+        ctx.lineWidth = Math.max(3, starRadius * 0.7);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(starPoint.x, starPoint.y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, bhPoint.x, bhPoint.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = Math.max(1, starRadius * 0.25);
+        ctx.beginPath();
+        ctx.moveTo(starPoint.x, starPoint.y);
+        ctx.quadraticCurveTo(ctrlX, ctrlY, bhPoint.x, bhPoint.y);
+        ctx.stroke();
+
+        const ringRadius = Math.max(bhRadius * 2.8, dist * 0.45);
+        const ringGrad = ctx.createRadialGradient(bhPoint.x, bhPoint.y, bhRadius * 1.1, bhPoint.x, bhPoint.y, ringRadius);
+        ringGrad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+        ringGrad.addColorStop(0.2, "rgba(251, 146, 60, 0.75)");
+        ringGrad.addColorStop(0.55, rgbaColor(body.color, 0.55));
+        ringGrad.addColorStop(0.85, "rgba(168, 85, 247, 0.35)");
+        ringGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        ctx.save();
+        ctx.translate(bhPoint.x, bhPoint.y);
+        ctx.rotate(-0.35);
+        ctx.scale(1, 0.35);
+        ctx.fillStyle = ringGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.restore();
+      }
+    }
+  }
+
   function drawTrails() {
     if (!state.showTrails) return;
     ctx.save();
@@ -2425,6 +2602,13 @@
         ctx.strokeStyle = effect.color;
         ctx.lineWidth = Math.max(1.5, 5 * alpha);
         ctx.beginPath(); ctx.arc(p.x, p.y, effect.radius * (1 - alpha * .25), 0, Math.PI * 2); ctx.stroke();
+      
+      } else if (effect.kind === "stream_particle") {
+        const p = worldToScreen(effect.x, effect.y);
+        ctx.fillStyle = effect.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, effect.size, 0, Math.PI * 2);
+        ctx.fill();
       } else if (effect.kind === "flash") {
         const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, effect.radius * (1.6 - alpha * .4));
         glow.addColorStop(0, "rgba(255,255,255,.98)");
@@ -2630,6 +2814,7 @@
       drawOrbitGuides();
       drawRocheZones();
       drawTrails();
+      drawStellarAccretionStreams();
       [...state.bodies].sort((a, b) => a.mass - b.mass).forEach(drawBody);
       drawCMEParticles();
       drawBinaryBarycenters();
@@ -3621,6 +3806,11 @@
     
     ui.triggerSupernovaGlobalBtn?.addEventListener("click", () => {
       triggerSupernova();
+    });
+
+    ui.crushBlackHoleBtn?.addEventListener("click", () => {
+      const body = selectedBody();
+      if (body) crushIntoBlackHole(body);
     });
 
     ui.triggerSupernovaBtn?.addEventListener("click", () => {
