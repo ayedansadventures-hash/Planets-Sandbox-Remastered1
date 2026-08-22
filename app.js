@@ -1296,70 +1296,89 @@
   }
 
   function resolveTidalDisruptions(dt) {
-
-    // Black Hole Tidal Disruption & Stellar Feeding Stream
+    // 1. Black Hole Extreme Tidal Shredding & Siphoning System
     for (const blackHole of state.bodies) {
       if (!blackHole.isBlackHole && blackHole.texture !== "blackHole") continue;
 
       for (let j = state.bodies.length - 1; j >= 0; j--) {
         const victim = state.bodies[j];
         if (victim.id === blackHole.id) continue;
-        const isStarOrGiant = victim.texture === "sun" || victim.scienceType === "star" || victim.scienceType === "blueStar" || (victim.scienceType === "gasGiant" && victim.mass * EARTHS_PER_SUN >= 30);
-        if (!isStarOrGiant) continue;
 
         const dx = victim.x - blackHole.x;
         const dy = victim.y - blackHole.y;
         const dist = Math.hypot(dx, dy);
-        const tdeRadius = Math.max(blackHole.radius * 24, 2.8 * Math.cbrt(blackHole.mass / Math.max(victim.mass, 1e-12)) * victim.radius);
-        
-        if (dist < tdeRadius && dist > blackHole.collisionRadius) {
-          victim.isBeingEaten = true;
-          victim.eatingBlackHoleId = blackHole.id;
-          blackHole.isFeeding = true;
-          blackHole.feedingTargetId = victim.id;
 
-          const siphonedMass = victim.mass * 0.015 * (1.0 - dist / tdeRadius) * (dt * 365.25);
-          
-          if (siphonedMass > 0 && victim.mass > siphonedMass) {
-            // Star shrinks in real-time as it loses mass
-            victim.mass -= siphonedMass;
-            const origMass = victim.referenceMass || (victim.mass + siphonedMass);
-            const massRatio = Math.max(0.05, victim.mass / origMass);
-            victim.radius = Math.max(0.018, (victim.referenceRadius || victim.radius) * Math.cbrt(massRatio));
-            victim.collisionRadius = Math.max(1 / KM_PER_AU, (victim.referenceCollisionRadius || victim.collisionRadius) * Math.cbrt(massRatio));
+        // Astrophysical Fluid Roche Limit for Black Hole
+        const massRatio = blackHole.mass / Math.max(victim.mass, 1e-15);
+        const rocheDist = 2.44 * (victim.collisionRadius || victim.radius || 0.00465) * Math.cbrt(massRatio);
+        const feedingDist = Math.max(rocheDist * 2.8, blackHole.radius * 22);
 
-            // Black Hole grows in mass and its gassy accretion disk expands!
-            blackHole.mass += siphonedMass * 0.85;
-            blackHole.accretionScale = clamp((blackHole.accretionScale || 2.2) + (siphonedMass * EARTHS_PER_SUN) * 0.00015, 1.8, 7.5);
-            blackHole.accretionGlow = clamp((blackHole.accretionGlow || 1.0) + 0.05, 1.0, 4.5);
-            blackHole.accretionDisk = true;
+        // CATASTROPHIC ROCHE LIMIT BREACH: Object crosses inside Roche Limit -> Instant Collapse & Spaghettification!
+        if (dist <= Math.max(rocheDist, blackHole.collisionRadius * 1.5)) {
+          // Trigger violent tidal shredding explosion
+          spawnImpactEffect(blackHole, victim, (blackHole.x + victim.x) / 2, (blackHole.y + victim.y) / 2);
+          SoundEngine.playSupernova();
 
-            // Flowing spiral stream particles
-            if (Math.random() < 0.75) {
-              const t = Math.random();
-              const streamAngle = Math.atan2(dy, dx) + t * Math.PI * 1.3;
-              const streamDist = blackHole.radius * 1.2 + t * (dist - blackHole.radius * 1.2);
-              const px = blackHole.x + Math.cos(streamAngle) * streamDist;
-              const py = blackHole.y + Math.sin(streamAngle) * streamDist;
-
-              state.effects.push({
-                kind: "stream_particle",
-                x: px,
-                y: py,
-                vx: -Math.sin(streamAngle) * (0.8 / Math.sqrt(streamDist)) - Math.cos(streamAngle) * 0.15,
-                vy: Math.cos(streamAngle) * (0.8 / Math.sqrt(streamDist)) - Math.sin(streamAngle) * 0.15,
-                life: 0.8 + Math.random() * 0.6,
-                maxLife: 1.4,
-                size: 2.0 + Math.random() * 3.5,
-                color: victim.color || "#60a5fa"
-              });
-            }
-          } else if (victim.mass <= siphonedMass * 2 || dist <= blackHole.collisionRadius * 1.5) {
-            spawnImpactEffect(blackHole, victim, (blackHole.x + victim.x) / 2, (blackHole.y + victim.y) / 2);
-            mergeBodies(blackHole, victim, `TIDAL CONSUMPTION: ${blackHole.name} completely consumed ${victim.name}!`);
-            break;
+          // Spawn high-energy relativistic plasma shreds
+          for (let k = 0; k < 30; k++) {
+            const angle = Math.random() * Math.PI * 2;
+            const spd = 0.2 + Math.random() * 0.8;
+            state.effects.push({
+              kind: "spark",
+              x: victim.x,
+              y: victim.y,
+              vx: Math.cos(angle) * spd,
+              vy: Math.sin(angle) * spd,
+              life: 2.0 + Math.random() * 2.0,
+              maxLife: 4.0,
+              size: 3.0 + Math.random() * 4.0,
+              color: victim.color || "#60a5fa"
+            });
           }
-        } else if (victim.eatingBlackHoleId === blackHole.id && dist >= tdeRadius) {
+
+          // Swallow mass and expand circular gas accretion disk massively
+          blackHole.mass += victim.mass;
+          blackHole.accretionScale = clamp((blackHole.accretionScale || 2.4) + 1.8, 2.0, 9.0);
+          blackHole.accretionGlow = clamp((blackHole.accretionGlow || 1.0) + 1.2, 1.0, 5.0);
+          blackHole.accretionDisk = true;
+
+          const victimName = victim.name;
+          state.bodies.splice(state.bodies.indexOf(victim), 1);
+          if (state.selectedId === victim.id) state.selectedId = blackHole.id;
+          if (state.followBodyId === victim.id) state.followBodyId = blackHole.id;
+          if (state.launchTargetId === victim.id) state.launchTargetId = blackHole.id;
+
+          refreshOrbitalRelationships();
+          updateSelectionUI();
+          renderSystemRoster();
+          toast(`💥 TIDAL COLLAPSE: ${victimName} entered ${blackHole.name}'s Roche limit and was shredded apart!`, 6000);
+          break;
+        }
+
+        // ACCRETION FEEDING ZONE: Outside Roche limit, siphons gas into circular accretion disk
+        if (dist <= feedingDist) {
+          const isStarOrGiant = victim.texture === "sun" || victim.scienceType === "star" || victim.scienceType === "blueStar" || (victim.scienceType === "gasGiant" && victim.mass * EARTHS_PER_SUN >= 25);
+          if (isStarOrGiant) {
+            victim.isBeingEaten = true;
+            victim.eatingBlackHoleId = blackHole.id;
+            blackHole.isFeeding = true;
+            blackHole.feedingTargetId = victim.id;
+
+            const siphonedMass = victim.mass * 0.012 * (1.0 - dist / feedingDist) * (dt * 365.25);
+            if (siphonedMass > 0 && victim.mass > siphonedMass) {
+              victim.mass -= siphonedMass;
+              const origMass = victim.referenceMass || (victim.mass + siphonedMass);
+              const massRatioShrink = Math.max(0.04, victim.mass / origMass);
+              victim.radius = Math.max(0.018, (victim.referenceRadius || victim.radius) * Math.cbrt(massRatioShrink));
+              victim.collisionRadius = Math.max(1 / KM_PER_AU, (victim.referenceCollisionRadius || victim.collisionRadius) * Math.cbrt(massRatioShrink));
+
+              blackHole.mass += siphonedMass * 0.85;
+              blackHole.accretionScale = clamp((blackHole.accretionScale || 2.4) + (siphonedMass * EARTHS_PER_SUN) * 0.00018, 1.8, 8.0);
+              blackHole.accretionGlow = clamp((blackHole.accretionGlow || 1.0) + 0.04, 1.0, 4.5);
+              blackHole.accretionDisk = true;
+            }
+          }
+        } else if (victim.eatingBlackHoleId === blackHole.id && dist > feedingDist) {
           victim.isBeingEaten = false;
           victim.eatingBlackHoleId = null;
         }
@@ -2201,91 +2220,63 @@
     const isBlueFeed = feedingStar && (feedingStar.scienceType === "blueStar" || feedingStar.color === "#60a5fa" || feedingStar.color === "#87bdff" || feedingStar.name.includes("Blue"));
 
     const diskScale = body.accretionScale || 2.4;
-    const innerRadius = radius * 1.18;
-    const outerRadius = radius * (2.2 + diskScale * 0.7);
-    const diskTilt = -0.30;
-    const diskScaleY = 0.32;
+    const innerRadius = radius * 1.15;
+    const outerRadius = radius * (2.4 + diskScale * 0.65);
 
-    // 1. Luminous Diffuse Outer Gas Nebula Halo
+    // 1. Outer Concentric Diffuse Gas Atmosphere (Full 360° Circular Glow centered at 0,0)
     ctx.save();
-    const diffuseHalo = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, outerRadius * 1.25);
+    const diffuseHalo = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius * 1.35);
     if (isBlueFeed) {
-      diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      diffuseHalo.addColorStop(0.2, "rgba(147, 197, 253, 0.85)");
-      diffuseHalo.addColorStop(0.5, "rgba(56, 189, 248, 0.45)");
-      diffuseHalo.addColorStop(0.8, "rgba(99, 102, 241, 0.18)");
+      diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      diffuseHalo.addColorStop(0.18, "rgba(186, 230, 253, 0.88)");
+      diffuseHalo.addColorStop(0.48, "rgba(56, 189, 248, 0.55)");
+      diffuseHalo.addColorStop(0.78, "rgba(99, 102, 241, 0.22)");
       diffuseHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
     } else {
-      diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      diffuseHalo.addColorStop(0.2, "rgba(251, 191, 36, 0.85)");
-      diffuseHalo.addColorStop(0.5, "rgba(234, 88, 12, 0.45)");
-      diffuseHalo.addColorStop(0.8, "rgba(168, 85, 247, 0.18)");
+      diffuseHalo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      diffuseHalo.addColorStop(0.18, "rgba(251, 191, 36, 0.88)");
+      diffuseHalo.addColorStop(0.48, "rgba(234, 88, 12, 0.55)");
+      diffuseHalo.addColorStop(0.78, "rgba(168, 85, 247, 0.22)");
       diffuseHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
     }
     ctx.fillStyle = diffuseHalo;
-    ctx.beginPath(); ctx.arc(0, 0, outerRadius * 1.25, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius * 1.35, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
 
-    // 2. Back Half of Swirling Gas Disk (behind event horizon)
+    // 2. High-Density Swirling Gas Accretion Disk (Full 360° Circular Ring centered at 0,0)
     ctx.save();
-    ctx.rotate(diskTilt);
-    ctx.scale(1, diskScaleY);
-    const backDisk = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius);
+    const diskGrad = ctx.createRadialGradient(0, 0, innerRadius, 0, 0, outerRadius);
     if (isBlueFeed) {
-      backDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      backDisk.addColorStop(0.22, "rgba(186, 230, 253, 0.92)");
-      backDisk.addColorStop(0.58, "rgba(56, 189, 248, 0.75)");
-      backDisk.addColorStop(0.88, "rgba(99, 102, 241, 0.4)");
-      backDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
+      diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      diskGrad.addColorStop(0.2, "rgba(224, 242, 254, 0.92)");
+      diskGrad.addColorStop(0.55, "rgba(56, 189, 248, 0.82)");
+      diskGrad.addColorStop(0.85, "rgba(99, 102, 241, 0.45)");
+      diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
     } else {
-      backDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      backDisk.addColorStop(0.22, "rgba(254, 215, 170, 0.92)");
-      backDisk.addColorStop(0.58, "rgba(249, 115, 22, 0.75)");
-      backDisk.addColorStop(0.88, "rgba(168, 85, 247, 0.4)");
-      backDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
+      diskGrad.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+      diskGrad.addColorStop(0.2, "rgba(254, 215, 170, 0.92)");
+      diskGrad.addColorStop(0.55, "rgba(249, 115, 22, 0.82)");
+      diskGrad.addColorStop(0.85, "rgba(168, 85, 247, 0.45)");
+      diskGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
     }
-    ctx.fillStyle = backDisk;
+    ctx.fillStyle = diskGrad;
     ctx.beginPath();
-    ctx.arc(0, 0, outerRadius, Math.PI, Math.PI * 2);
-    ctx.arc(0, 0, innerRadius, Math.PI * 2, Math.PI, true);
+    ctx.arc(0, 0, outerRadius, 0, Math.PI * 2);
+    ctx.arc(0, 0, innerRadius, Math.PI * 2, 0, true);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
 
-    // 3. Central Event Horizon (Pure Black Singularity)
+    // 3. Central Event Horizon (Pitch Black Singularity Sphere)
     ctx.fillStyle = "#000000";
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
 
-    // 4. Photon Sphere Ring
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(0, 0, radius * 1.04, 0, Math.PI * 2); ctx.stroke();
-
-    // 5. Front Half of Swirling Gas Disk (crossing in front of event horizon with Doppler beaming)
-    ctx.save();
-    ctx.rotate(diskTilt);
-    ctx.scale(1, diskScaleY);
-    const frontDisk = ctx.createRadialGradient(-radius * 0.4, 0, innerRadius * 0.85, 0, 0, outerRadius);
-    if (isBlueFeed) {
-      frontDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      frontDisk.addColorStop(0.2, "rgba(224, 242, 254, 0.95)");
-      frontDisk.addColorStop(0.52, "rgba(56, 189, 248, 0.85)");
-      frontDisk.addColorStop(0.85, "rgba(99, 102, 241, 0.45)");
-      frontDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
-    } else {
-      frontDisk.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      frontDisk.addColorStop(0.2, "rgba(254, 215, 170, 0.95)");
-      frontDisk.addColorStop(0.52, "rgba(249, 115, 22, 0.85)");
-      frontDisk.addColorStop(0.85, "rgba(168, 85, 247, 0.45)");
-      frontDisk.addColorStop(1, "rgba(0, 0, 0, 0)");
-    }
-    ctx.fillStyle = frontDisk;
-    ctx.beginPath();
-    ctx.arc(0, 0, outerRadius, 0, Math.PI);
-    ctx.arc(0, 0, innerRadius, Math.PI, 0, true);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    // 4. Luminous White Photon Sphere Ring (1.5 Rs)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2); ctx.stroke();
   }
 
   function drawBody(body) {
