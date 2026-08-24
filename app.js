@@ -2564,39 +2564,6 @@
     return true;
   }
 
-  function drawLabels() {
-    if (!state.showLabels) return;
-    const boxes = [];
-    ctx.font = "500 10px Inter, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    for (const body of [...state.bodies].sort((a, b) => b.mass - a.mass)) {
-      const parent = body.parentId ? state.bodies.find((candidate) => candidate.id === body.parentId) : null;
-      if (body.isMoon && parent !== selectedBody() && parent?.id !== state.hoveredId && body.id !== state.selectedId && body.id !== state.hoveredId && (!body.orbit || body.orbit.a * state.camera.zoom < 20)) continue;
-      const p = bodyDisplayPoint(body);
-      const radius = visualRadius(body);
-      if (p.x < -40 || p.x > state.viewport.width + 40 || p.y < -40 || p.y > state.viewport.height + 40) continue;
-      const width = Math.max(28, ctx.measureText(body.name).width + 10);
-      let y = p.y + radius + 14;
-      let box = { left: p.x - width / 2, right: p.x + width / 2, top: y - 7, bottom: y + 7 };
-      let attempts = 0;
-      while (boxes.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top) && attempts < 8) {
-        y += 14;
-        box = { ...box, top: y - 7, bottom: y + 7 };
-        attempts += 1;
-      }
-      if (y > state.viewport.height - 18) y = p.y - radius - 14;
-      if (attempts > 0) {
-        ctx.strokeStyle = "rgba(126,164,218,.22)";
-        ctx.lineWidth = .7;
-        ctx.beginPath(); ctx.moveTo(p.x, p.y + radius + 3); ctx.lineTo(p.x, y - 7); ctx.stroke();
-      }
-      ctx.fillStyle = state.selectedId === body.id ? "#b9d8ff" : "rgba(205,222,248,.78)";
-      ctx.fillText(body.name, p.x, y);
-      boxes.push({ left: p.x - width / 2, right: p.x + width / 2, top: y - 7, bottom: y + 7 });
-    }
-  }
-
   function drawTexture(body, radius) {
     // 1. Procedural Atmospheric Bands (Universe Sandbox 2 style multi-band gas giants & banded worlds)
     if (body.bandCount && body.bandCount > 0) {
@@ -2789,7 +2756,323 @@
     }
   }
 
-  function drawOrbitGuides() {
+  function drawLabels() {
+    if (!state.showLabels) return;
+    const boxes = [];
+    ctx.font = "500 10px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const body of [...state.bodies].sort((a, b) => b.mass - a.mass)) {
+      const parent = body.parentId ? state.bodies.find((candidate) => candidate.id === body.parentId) : null;
+      if (body.isMoon && parent !== selectedBody() && parent?.id !== state.hoveredId && body.id !== state.selectedId && body.id !== state.hoveredId && (!body.orbit || body.orbit.a * state.camera.zoom < 20)) continue;
+      const p = bodyDisplayPoint(body);
+      const radius = visualRadius(body);
+      if (p.x < -40 || p.x > state.viewport.width + 40 || p.y < -40 || p.y > state.viewport.height + 40) continue;
+      const width = Math.max(28, ctx.measureText(body.name).width + 10);
+      let y = p.y + radius + 14;
+      let box = { left: p.x - width / 2, right: p.x + width / 2, top: y - 7, bottom: y + 7 };
+      let attempts = 0;
+      while (boxes.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top) && attempts < 8) {
+        y += 14;
+        box = { ...box, top: y - 7, bottom: y + 7 };
+        attempts += 1;
+      }
+      if (y > state.viewport.height - 18) y = p.y - radius - 14;
+      if (attempts > 0) {
+        ctx.strokeStyle = "rgba(126,164,218,.22)";
+        ctx.lineWidth = .7;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y + radius + 3); ctx.lineTo(p.x, y - 7); ctx.stroke();
+      }
+      ctx.fillStyle = state.selectedId === body.id ? "#b9d8ff" : "rgba(205,222,248,.78)";
+      ctx.fillText(body.name, p.x, y);
+      boxes.push({ left: p.x - width / 2, right: p.x + width / 2, top: y - 7, bottom: y + 7 });
+    }
+  }
+
+  function drawSolarProminences(star, radius) {
+    if (!state.solarFlaresEnabled || !star.prominences || star.prominences.length === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const time = performance.now() * 0.002;
+
+    for (const prom of star.prominences) {
+      const alpha = Math.sin((prom.life / prom.maxLife) * Math.PI);
+      const a1 = prom.baseAngle;
+      const a2 = prom.baseAngle + prom.span;
+      const midAngle = (a1 + a2) / 2;
+
+      const p1x = Math.cos(a1) * radius;
+      const p1y = Math.sin(a1) * radius;
+      const p2x = Math.cos(a2) * radius;
+      const p2y = Math.sin(a2) * radius;
+
+      const h = radius * prom.height + Math.sin(time * prom.pulseSpeed) * 3;
+      const cpx = Math.cos(midAngle) * h * 1.3;
+      const cpy = Math.sin(midAngle) * h * 1.3;
+
+      ctx.strokeStyle = `rgba(255, 135, 35, ${alpha * 0.75})`;
+      ctx.lineWidth = Math.max(1.8, radius * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(p1x, p1y);
+      ctx.quadraticCurveTo(cpx, cpy, p2x, p2y);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(255, 245, 190, ${alpha * 0.95})`;
+      ctx.lineWidth = Math.max(0.8, radius * 0.035);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawStarDiffractionSpikes(star, radius, p) {
+    if (!state.lensFlaresEnabled) return;
+    const isStar = star.texture === "sun" || star.scienceType === "star" || star.mass * EARTHS_PER_SUN > 10000;
+    if (!isStar) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+
+    const spikeLength = Math.max(35, radius * 3.6);
+    const color = star.color || "#ffb13b";
+
+    const hGrad = ctx.createLinearGradient(-spikeLength * 2.2, 0, spikeLength * 2.2, 0);
+    hGrad.addColorStop(0, "rgba(80, 160, 255, 0)");
+    hGrad.addColorStop(0.35, rgbaColor(color, 0.35));
+    hGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.92)");
+    hGrad.addColorStop(0.65, rgbaColor(color, 0.35));
+    hGrad.addColorStop(1, "rgba(80, 160, 255, 0)");
+
+    ctx.strokeStyle = hGrad;
+    ctx.lineWidth = Math.max(1.2, radius * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(-spikeLength * 2.2, 0);
+    ctx.lineTo(spikeLength * 2.2, 0);
+    ctx.stroke();
+
+    const angles = [0, Math.PI / 2, Math.PI / 4, -Math.PI / 4];
+    for (let i = 0; i < angles.length; i++) {
+      const ang = angles[i];
+      const len = i < 2 ? spikeLength * 1.3 : spikeLength * 0.65;
+      const width = i < 2 ? 1.4 : 0.75;
+
+      const grad = ctx.createLinearGradient(-Math.cos(ang) * len, -Math.sin(ang) * len, Math.cos(ang) * len, Math.sin(ang) * len);
+      grad.addColorStop(0, "rgba(255, 255, 255, 0)");
+      grad.addColorStop(0.5, "rgba(255, 255, 255, 0.85)");
+      grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(-Math.cos(ang) * len, -Math.sin(ang) * len);
+      ctx.lineTo(Math.cos(ang) * len, Math.sin(ang) * len);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawAtmosphereAndAurora(body, radius) {
+    if (body.gasType && body.gasType !== "none" && radius >= 5) {
+      const atmoColor = body.atmoColor || "#60a5fa";
+      const haze = (body.atmoHaze ?? 60) / 100;
+      const pressure = body.atmoPressure ?? 1.0;
+      const atmoThickness = Math.max(1.2, radius * (0.05 + Math.min(0.25, pressure * 0.02)));
+
+      ctx.save();
+      ctx.strokeStyle = atmoColor;
+      ctx.lineWidth = atmoThickness;
+      ctx.shadowColor = atmoColor;
+      ctx.shadowBlur = Math.max(3, radius * 0.25 * haze);
+      ctx.globalAlpha = clamp(0.3 + haze * 0.6, 0.2, 0.95);
+      ctx.beginPath();
+      ctx.arc(0, 0, radius + atmoThickness * 0.4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (state.auroraEnabled) {
+      const style = atmosphereStyles[body.texture];
+      if (style && radius >= 5) {
+        ctx.save();
+        ctx.strokeStyle = style[0];
+        ctx.lineWidth = Math.max(.7, radius * style[1]);
+        ctx.shadowColor = style[0];
+        ctx.shadowBlur = Math.max(2, radius * .18);
+        ctx.beginPath(); ctx.arc(0, 0, radius + ctx.lineWidth * .45, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (body.auroraExcitement > 0) {
+      body.auroraExcitement = Math.max(0, body.auroraExcitement - 0.012);
+      const excitement = body.auroraExcitement;
+      if (excitement > 0.01 && (body.magneticScale ?? 1) > 0.02) {
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+
+        const auroraGlow = ctx.createRadialGradient(0, -radius * 0.85, 0, 0, -radius * 0.85, radius * 0.6);
+        auroraGlow.addColorStop(0, `rgba(74, 222, 128, ${excitement * 0.85})`);
+        auroraGlow.addColorStop(0.5, `rgba(168, 85, 247, ${excitement * 0.5})`);
+        auroraGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        ctx.fillStyle = auroraGlow;
+        ctx.beginPath();
+        ctx.ellipse(0, -radius * 0.88, radius * 0.52, radius * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(0, radius * 0.88, radius * 0.52, radius * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawCMEParticles() {
+    if (!state.solarFlaresEnabled || !state.cmeParticles.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+
+    for (const p of state.cmeParticles) {
+      const screenPos = worldToScreen(p.x, p.y);
+      if (screenPos.x < -20 || screenPos.x > state.viewport.width + 20 || screenPos.y < -20 || screenPos.y > state.viewport.height + 20) continue;
+
+      const alpha = clamp(p.life / p.maxLife, 0, 1);
+      const grad = ctx.createRadialGradient(screenPos.x, screenPos.y, 0, screenPos.x, screenPos.y, p.size * 3.5);
+      grad.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+      grad.addColorStop(0.3, rgbaColor(p.color, 0.85));
+      grad.addColorStop(0.7, rgbaColor(p.color, 0.35));
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(screenPos.x, screenPos.y, p.size * 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = `rgba(251, 146, 60, ${alpha * 0.6})`;
+      ctx.lineWidth = Math.max(1, p.size * 0.8);
+      ctx.beginPath();
+      ctx.moveTo(screenPos.x, screenPos.y);
+      ctx.lineTo(screenPos.x - p.vx * 3.2, screenPos.y - p.vy * 3.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawRing(body, radius, behind) {
+    ctx.save();
+    ctx.rotate(-.22);
+    ctx.scale(1, .34);
+    ctx.strokeStyle = behind ? "rgba(175,157,123,.42)" : "rgba(232,215,177,.7)";
+    ctx.lineWidth = Math.max(2, radius * .18);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 1.7 * (body.ringScale ?? 1), behind ? Math.PI : 0, behind ? Math.PI * 2 : Math.PI);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawVelocity(body, p) {
+    const scale = 6;
+    const ex = p.x + body.vx * scale;
+    const ey = p.y + body.vy * scale;
+    ctx.strokeStyle = `${body.color}aa`;
+    ctx.fillStyle = body.color;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(ex, ey); ctx.stroke();
+    const angle = Math.atan2(ey - p.y, ex - p.x);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - Math.cos(angle - .5) * 6, ey - Math.sin(angle - .5) * 6);
+    ctx.lineTo(ex - Math.cos(angle + .5) * 6, ey - Math.sin(angle + .5) * 6);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawEffects() {
+    for (const effect of state.effects) {
+      const p = worldToScreen(effect.x, effect.y);
+      const alpha = clamp(effect.life / effect.maxLife, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = effect.kind === "gas" ? alpha * .38 : alpha;
+      if (effect.kind === "shockwave") {
+        ctx.strokeStyle = effect.color;
+        ctx.lineWidth = Math.max(1.5, 5 * alpha);
+        ctx.beginPath(); ctx.arc(p.x, p.y, effect.radius * (1 - alpha * .25), 0, Math.PI * 2); ctx.stroke();
+      
+      } else if (effect.kind === "stream_particle") {
+        const p = worldToScreen(effect.x, effect.y);
+        ctx.fillStyle = effect.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, effect.size, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (effect.kind === "flash") {
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, effect.radius * (1.6 - alpha * .4));
+        glow.addColorStop(0, "rgba(255,255,255,.98)");
+        glow.addColorStop(.24, effect.color);
+        glow.addColorStop(1, "rgba(255,130,55,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(p.x, p.y, effect.radius * 1.6, 0, Math.PI * 2); ctx.fill();
+      } else if (effect.kind === "gas") {
+        const gas = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, effect.size);
+        gas.addColorStop(0, effect.color);
+        gas.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = gas;
+        ctx.beginPath(); ctx.arc(p.x, p.y, effect.size, 0, Math.PI * 2); ctx.fill();
+      } else if (effect.kind === "spark") {
+        ctx.strokeStyle = lighten(effect.color, .55);
+        ctx.lineWidth = Math.max(1, effect.size * .45);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - effect.vx * 28, p.y - effect.vy * 28); ctx.stroke();
+      } else {
+        ctx.translate(p.x, p.y); if (effect.rotation != null && !Number.isNaN(effect.rotation)) ctx.rotate(effect.rotation);
+        ctx.fillStyle = effect.color;
+        ctx.fillRect(-effect.size / 2, -effect.size / 3, effect.size, effect.size * .66);
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawLaunchPreview() {
+    if (state.addMode && state.launchMode === "autoOrbit") {
+      const mouseWorld = screenToWorld(state.pointer.x, state.pointer.y);
+      const { spec } = currentSpawnSpec();
+      const primary = findDominantGravityParent(mouseWorld.x, mouseWorld.y, spec.mass);
+      const mouseScreen = { x: state.pointer.x, y: state.pointer.y };
+      ctx.save();
+      if (primary) {
+        const primaryScreen = worldToScreen(primary.x, primary.y);
+        const dist = Math.hypot(mouseWorld.x - primary.x, mouseWorld.y - primary.y);
+        ctx.strokeStyle = "rgba(102, 198, 255, 0.75)";
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(primaryScreen.x, primaryScreen.y, dist * state.camera.zoom, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(132, 191, 255, 0.4)";
+        ctx.beginPath();
+        ctx.moveTo(primaryScreen.x, primaryScreen.y);
+        ctx.lineTo(mouseScreen.x, mouseScreen.y);
+        ctx.stroke();
+
+        ctx.fillStyle = "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(mouseScreen.x, mouseScreen.y, Math.max(6, spec.radius * state.camera.zoom * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = "600 11px Inter, sans-serif";
+        ctx.fillStyle = "rgba(194, 225, 255, 0.95)";
+        ctx.textAlign = "left";
+        ctx.fillText(`Auto-orbiting ${primary.name} (${formatDistance(dist)})`, mouseScreen.x + 14, mouseScreen.y - 8);
+      } else {
+        ctx.fillStyle = "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(mouseScreen.x, mouseScreen.y, Math.max(6, spec.radius * state.camera.zoom * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = "600 11px Inter, sans-serif";
+        ctx.fillStyle = "rgba(194, 225, 255, 0.95)";
+        ctx.textAlign = "left";
+        ctx.fillText("Spawn object in deep space", mouseScreen.x + 14, mouseScreen.y - 8);
+      }
+      ctx.restore();
+      return;
+    }
     if (state.orbitPlacement) {
       const target = state.bodies.find((body) => body.id === state.launchTargetId);
       if (!target) return;
@@ -2936,6 +3219,8 @@
       console.error("Rendering error:", err);
     }
   }
+
+
 
   function frame(now) {
     const wallElapsed = Math.max(0, (now - state.lastFrame) / 1000);
