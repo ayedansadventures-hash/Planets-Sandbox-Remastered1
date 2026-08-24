@@ -120,6 +120,92 @@
                 <button id="deleteBody" class="danger-button">Delete</button>
                 <button id="crushBlackHoleBtn" class="danger-button" style="width: 100%; justify-content: center; gap: 6px; margin-top: 6px;"><span>⚫</span> Crush into Black Hole</button>
               </div>
+              
+              <!-- PLANET ENGINEERING & CUSTOMIZER -->
+              <div class="customizer-container" id="planetCustomizer">
+                <div class="customizer-tabs">
+                  <button type="button" class="tab-btn active" id="tabBandsBtn">🪐 Bands</button>
+                  <button type="button" class="tab-btn" id="tabWaterBtn">🌊 Water &amp; Ice</button>
+                  <button type="button" class="tab-btn" id="tabAtmoBtn">🧪 Atmosphere</button>
+                </div>
+
+                <!-- BANDS TAB -->
+                <div class="customizer-panel active" id="panelBands">
+                  <div class="range-field">
+                    <div class="range-label"><label for="bandCount">Atmospheric Bands <small>0–16</small></label><output id="bandCountValue">6</output></div>
+                    <input id="bandCount" type="range" min="0" max="16" value="6" />
+                  </div>
+                  <div class="field-row">
+                    <label class="stacked-field">Palette Preset
+                      <select id="bandPaletteSelect">
+                        <option value="custom">Custom Palette</option>
+                        <option value="purpleNebula">Purple Gas Giant</option>
+                        <option value="neonCyan">Neon Cyan Ice Giant</option>
+                        <option value="jupiterGold">Jupiter Amber Gold</option>
+                        <option value="crimsonFury">Crimson Hot Jupiter</option>
+                        <option value="emeraldGas">Emerald Methane</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="field-row color-palette-row">
+                    <label class="stacked-field color-field">Base<input id="bandColor1" type="color" value="#6b21a8" /></label>
+                    <label class="stacked-field color-field">Band 2<input id="bandColor2" type="color" value="#9333ea" /></label>
+                    <label class="stacked-field color-field">Band 3<input id="bandColor3" type="color" value="#c084fc" /></label>
+                    <label class="stacked-field color-field">Storm<input id="stormColor" type="color" value="#f43f5e" /></label>
+                  </div>
+                  <div class="range-field">
+                    <div class="range-label"><label for="bandTurbulence">Zonal Wind Shear &amp; Waves</label><output id="bandTurbulenceValue">50%</output></div>
+                    <input id="bandTurbulence" type="range" min="0" max="100" value="50" />
+                  </div>
+                  <div class="toggle-grid" style="margin-top: 6px;">
+                    <label><input id="showGreatStorm" type="checkbox" checked /><span></span>Great Storm Vortex</label>
+                  </div>
+                </div>
+
+                <!-- WATER & ICE TAB -->
+                <div class="customizer-panel" id="panelWater" style="display: none;">
+                  <div class="range-field">
+                    <div class="range-label"><label for="waterCoverage">Surface Water Level <small>0–100%</small></label><output id="waterCoverageValue">71%</output></div>
+                    <input id="waterCoverage" type="range" min="0" max="100" value="71" />
+                  </div>
+                  <div class="field-row">
+                    <label class="stacked-field color-field">Ocean Color<input id="oceanColor" type="color" value="#1d4ed8" /></label>
+                    <label class="stacked-field color-field">Land Color<input id="landColor" type="color" value="#15803d" /></label>
+                  </div>
+                  <div class="range-field">
+                    <div class="range-label"><label for="iceCapCoverage">Polar Ice Caps <small>0–100%</small></label><output id="iceCapCoverageValue">18%</output></div>
+                    <input id="iceCapCoverage" type="range" min="0" max="100" value="18" />
+                  </div>
+                </div>
+
+                <!-- ATMOSPHERE TAB -->
+                <div class="customizer-panel" id="panelAtmo" style="display: none;">
+                  <div class="field-row">
+                    <label class="stacked-field">Dominant Gas Mix
+                      <select id="gasTypeSelect">
+                        <option value="earthAir">Nitrogen-Oxygen (Earth)</option>
+                        <option value="carbonDioxide">Carbon Dioxide (Venus/Mars)</option>
+                        <option value="hydrogenHelium">Hydrogen-Helium (Gas Giant)</option>
+                        <option value="methane">Methane (Titan/Neptune)</option>
+                        <option value="ammonia">Ammonia (Exotic)</option>
+                        <option value="none">Airless Vacuum (Mercury/Moon)</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="range-field">
+                    <div class="range-label"><label for="atmoPressure">Atmosphere Pressure <small>0–100 atm</small></label><output id="atmoPressureValue">1.00 atm</output></div>
+                    <input id="atmoPressure" type="range" min="0" max="100" step="0.1" value="1.0" />
+                  </div>
+                  <div class="field-row">
+                    <label class="stacked-field color-field">Halo Tint<input id="atmoColor" type="color" value="#60a5fa" /></label>
+                    <div class="range-field grow">
+                      <div class="range-label"><label for="atmoHaze">Rayleigh Haze</label><output id="atmoHazeValue">60%</output></div>
+                      <input id="atmoHaze" type="range" min="0" max="100" value="60" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div class="science-card">
                 <div class="science-hero">
                   <div class="planet-preview" id="planetPreview"></div>
