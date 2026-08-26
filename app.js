@@ -1589,33 +1589,86 @@ return {
         const magnetosphereDist = (body.collisionRadius || 0.001) * (1.8 + Math.sqrt(magScale) * 3.8);
 
         if (dist <= magnetosphereDist) {
-          const shielding = clamp(Math.sqrt(magScale) / 1.6, 0, 0.98);
-          const unshieldedFraction = 1.0 - shielding;
+          const magScale = Math.max(0, body.magneticScale ?? 1);
 
-          // Auroras triggered on shielded magnetosphere
-          body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.35 + shielding * 0.45);
+          if (magScale >= 0.5) {
+            // TIER 1: STRONG MAGNETIC FIELD (Earth, Jupiter, Saturn, Uranus, Neptune, custom magnetic worlds >= 0.5x)
+            // Complete magnetic deflection: ZERO scorching! Triggers intense shimmering auroras and bow shock deflection wave!
+            body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.65);
+            body.bowShockFlare = 1.0;
 
-          // Thermal Heating, Scorching, and Radium absorption
-          if (unshieldedFraction > 0.05) {
-            body.temperatureKelvin = (body.temperatureKelvin || 288) + 32.0 * unshieldedFraction;
-            body.radiumDose = (body.radiumDose || 0.12) + 7.5 * unshieldedFraction;
-            body.scorchLevel = clamp((body.scorchLevel || 0) + 0.12 * unshieldedFraction, 0, 1.0);
-
-            // Dynamic Mercury Scorching transformation
-            if (body.name.includes("Mercury") || body.texture === "mercury") {
-              body.name = "Scorched Mercury";
-              body.color = "#c2713d"; // Orangey grayish scorched tint
-              if (body.science) {
-                body.science.summary = "Solar flare bombarded scorched world with burnt crust and extreme radiation.";
-                body.science.temperature = `${Math.round(body.temperatureKelvin - 273.15)} °C (Scorched)`;
-              }
-              if (!body.scorchNotified) {
-                body.scorchNotified = true;
-                toast("🔥 SOLAR FLARE STRIKE: CME particles bombarded Mercury's unshielded surface, creating Scorched Mercury!", 5000);
-              }
+            if (!body.auroraNotified) {
+              body.auroraNotified = true;
+              toast(`🌌 GEOMAGNETIC AURORA: ${body.name}'s magnetic field deflected the solar flare, igniting brilliant polar auroras!`, 4500);
             }
 
-            // Spawn impact molten thermal sparks & plasma filaments
+            // Deflected auroral plasma sparks
+            for (let s = 0; s < 2; s++) {
+              const ang = Math.random() * Math.PI * 2;
+              const spd = 0.12 + Math.random() * 0.35;
+              state.effects.push({
+                kind: "spark",
+                x: p.x,
+                y: p.y,
+                vx: (p.vx * 0.25) + Math.cos(ang) * spd,
+                vy: (p.vy * 0.25) + Math.sin(ang) * spd,
+                life: 0.8 + Math.random() * 0.7,
+                maxLife: 1.5,
+                size: 2.0 + Math.random() * 2.2,
+                color: Math.random() > 0.5 ? "#4ade80" : "#a855f7"
+              });
+            }
+          } else if (magScale > 0.05 && magScale < 0.5) {
+            // TIER 2: WEAK MAGNETIC FIELD (Mars 0.1x, weak crustal worlds)
+            // Partial shielding: Mild warming and radiation, slight auroral flicker, NO heavy scorching!
+            const weakFactor = (0.5 - magScale) / 0.45;
+            body.temperatureKelvin = (body.temperatureKelvin || 210) + 14.0 * weakFactor;
+            body.radiumDose = (body.radiumDose || 0.12) + 3.0 * weakFactor;
+            body.auroraExcitement = Math.min(0.65, (body.auroraExcitement || 0) + 0.3);
+
+            if (!body.weakShieldNotified) {
+              body.weakShieldNotified = true;
+              toast(`⚡ IONOSPHERIC DISTURBANCE: ${body.name}'s weak magnetic field partially absorbed solar flare energy.`, 4000);
+            }
+
+            for (let s = 0; s < 2; s++) {
+              const ang = Math.random() * Math.PI * 2;
+              const spd = 0.1 + Math.random() * 0.25;
+              state.effects.push({
+                kind: "spark",
+                x: p.x,
+                y: p.y,
+                vx: (p.vx * 0.2) + Math.cos(ang) * spd,
+                vy: (p.vy * 0.2) + Math.sin(ang) * spd,
+                life: 0.7 + Math.random() * 0.6,
+                maxLife: 1.3,
+                size: 1.8 + Math.random() * 1.5,
+                color: "#f59e0b"
+              });
+            }
+          } else {
+            // TIER 3: ZERO / AIRLESS UNPROTECTED MAGNETIC FIELD (Mercury, Moon, Venus, airless bodies, magScale <= 0.05)
+            // Direct severe scorching! Surface burns into orangey-grayish crust with thermal fractures!
+            body.temperatureKelvin = (body.temperatureKelvin || 288) + 45.0;
+            body.radiumDose = (body.radiumDose || 0.12) + 9.5;
+            body.scorchLevel = clamp((body.scorchLevel || 0) + 0.18, 0, 1.0);
+
+            if (!body.name.startsWith("Scorched ")) {
+              body.originalName = body.originalName || body.name;
+              body.name = `Scorched ${body.originalName}`;
+            }
+
+            if (body.science) {
+              body.science.summary = "Solar flare bombarded scorched world with burnt crust and extreme radiation.";
+              body.science.temperature = `${Math.round(body.temperatureKelvin - 273.15)} °C (Scorched)`;
+            }
+
+            if (!body.scorchNotified) {
+              body.scorchNotified = true;
+              toast(`🔥 SOLAR FLARE STRIKE: CME particles slammed into ${body.name}'s unshielded surface, scorching the terrain!`, 5000);
+            }
+
+            // Molten impact sparks
             for (let s = 0; s < 3; s++) {
               const spd = 0.15 + Math.random() * 0.45;
               const ang = Math.random() * Math.PI * 2;
@@ -1628,7 +1681,7 @@ return {
                 life: 0.9 + Math.random() * 0.9,
                 maxLife: 1.8,
                 size: 2.2 + Math.random() * 3.0,
-                color: body.temperatureKelvin > 1000 ? "#ff4500" : (body.name.includes("Mercury") ? "#ea580c" : "#f59e0b")
+                color: body.temperatureKelvin > 1000 ? "#ff4500" : "#ea580c"
               });
             }
           }
@@ -2962,25 +3015,52 @@ function drawMagnetosphere(body, radius) {
     }
 
     if (body.auroraExcitement > 0) {
-      body.auroraExcitement = Math.max(0, body.auroraExcitement - 0.012);
+      body.auroraExcitement = Math.max(0, body.auroraExcitement - 0.008);
       const excitement = body.auroraExcitement;
       if (excitement > 0.01 && (body.magneticScale ?? 1) > 0.02) {
         ctx.save();
         ctx.globalCompositeOperation = "screen";
+        const time = performance.now() * 0.003;
+        const wave = Math.sin(time * 3 + (body.id || 1)) * 0.5 + 0.5;
 
-        const auroraGlow = ctx.createRadialGradient(0, -radius * 0.85, 0, 0, -radius * 0.85, radius * 0.6);
-        auroraGlow.addColorStop(0, `rgba(74, 222, 128, ${excitement * 0.85})`);
-        auroraGlow.addColorStop(0.5, `rgba(168, 85, 247, ${excitement * 0.5})`);
-        auroraGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+        // North Polar Aurora Oval
+        const northGlow = ctx.createRadialGradient(0, -radius * 0.85, 0, 0, -radius * 0.85, radius * 0.65);
+        northGlow.addColorStop(0, `rgba(74, 222, 128, ${excitement * (0.75 + wave * 0.2)})`);
+        northGlow.addColorStop(0.45, `rgba(56, 189, 248, ${excitement * 0.6})`);
+        northGlow.addColorStop(0.75, `rgba(168, 85, 247, ${excitement * 0.45})`);
+        northGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
 
-        ctx.fillStyle = auroraGlow;
+        ctx.fillStyle = northGlow;
         ctx.beginPath();
-        ctx.ellipse(0, -radius * 0.88, radius * 0.52, radius * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, -radius * 0.88, radius * 0.55, radius * 0.22, 0, 0, Math.PI * 2);
         ctx.fill();
 
+        // North Auroral Curtain Ring
+        ctx.strokeStyle = `rgba(125, 255, 175, ${excitement * 0.85})`;
+        ctx.lineWidth = Math.max(0.8, radius * 0.04);
         ctx.beginPath();
-        ctx.ellipse(0, radius * 0.88, radius * 0.52, radius * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, -radius * 0.88, radius * 0.48, radius * 0.18, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // South Polar Aurora Oval
+        const southGlow = ctx.createRadialGradient(0, radius * 0.85, 0, 0, radius * 0.85, radius * 0.65);
+        southGlow.addColorStop(0, `rgba(74, 222, 128, ${excitement * (0.75 + wave * 0.2)})`);
+        southGlow.addColorStop(0.45, `rgba(56, 189, 248, ${excitement * 0.6})`);
+        southGlow.addColorStop(0.75, `rgba(168, 85, 247, ${excitement * 0.45})`);
+        southGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        ctx.fillStyle = southGlow;
+        ctx.beginPath();
+        ctx.ellipse(0, radius * 0.88, radius * 0.55, radius * 0.22, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        // South Auroral Curtain Ring
+        ctx.strokeStyle = `rgba(168, 85, 247, ${excitement * 0.85})`;
+        ctx.lineWidth = Math.max(0.8, radius * 0.04);
+        ctx.beginPath();
+        ctx.ellipse(0, radius * 0.88, radius * 0.48, radius * 0.18, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.restore();
       }
     }
