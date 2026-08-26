@@ -1939,6 +1939,87 @@ function integrate(dt) {
     toast(`Spawned dynamic ring system of orbiting particles around ${targetPlanet.name}!`, 4500);
   }
 
+  function openSolarFlareLauncher() {
+    const dialog = document.getElementById("solarFlareDialog");
+    const targetSelect = document.getElementById("flareTargetSelect");
+    if (!dialog) {
+      triggerSolarFlare();
+      return;
+    }
+
+    if (targetSelect) {
+      targetSelect.innerHTML = "";
+      const planets = state.bodies.filter(b => b.texture !== "sun" && b.scienceType !== "star" && !b.isBlackHole);
+      if (planets.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No planets in simulation";
+        targetSelect.appendChild(opt);
+      } else {
+        for (const p of planets) {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          const shieldText = (p.magneticScale ?? 1) >= 0.5 ? "Shielded Magnetosphere" : (p.magneticScale ?? 1) > 0.05 ? "Weak Field" : "Unshielded (0×)";
+          opt.textContent = `${p.name} — ${shieldText}`;
+          if (p.id === state.selectedId) opt.selected = true;
+          targetSelect.appendChild(opt);
+        }
+      }
+    }
+
+    try {
+      dialog.showModal();
+    } catch (err) {
+      dialog.setAttribute("open", "");
+    }
+  }
+
+  function launchDirectedSolarFlare(targetBody) {
+    const star = state.bodies.find((b) => b.texture === "sun" || b.scienceType === "star") || state.bodies[0];
+    if (!star || !targetBody) {
+      triggerSolarFlare();
+      return;
+    }
+
+    SoundEngine.playSolarFlare();
+    const targetAngle = Math.atan2(targetBody.y - star.y, targetBody.x - star.x);
+
+    if (!star.prominences) star.prominences = [];
+    for (let k = 0; k < 4; k++) {
+      star.prominences.push({
+        baseAngle: targetAngle - 0.25 + k * 0.16,
+        span: 0.25 + Math.random() * 0.25,
+        height: 0.7 + Math.random() * 0.9,
+        pulseSpeed: 1.5 + Math.random() * 2.0,
+        life: 0.01,
+        maxLife: 5.0
+      });
+    }
+
+    const numParticles = 54;
+    for (let i = 0; i < numParticles; i++) {
+      const spread = (Math.random() - 0.5) * 0.24;
+      const angle = targetAngle + spread;
+      const speed = 7.5 * (0.8 + Math.random() * 0.4);
+
+      state.cmeParticles.push({
+        x: star.x + Math.cos(angle) * (star.collisionRadius * 1.5),
+        y: star.y + Math.sin(angle) * (star.collisionRadius * 1.5),
+        vx: star.vx + Math.cos(angle) * speed,
+        vy: star.vy + Math.sin(angle) * speed,
+        life: 8.5 + Math.random() * 4.0,
+        maxLife: 12.5,
+        size: 3.5 + Math.random() * 4.5,
+        color: Math.random() > 0.4 ? "#fb923c" : "#fed7aa",
+        originId: star.id,
+        targetId: targetBody.id
+      });
+    }
+
+    if (state.cmeParticles.length > 250) state.cmeParticles.splice(0, state.cmeParticles.length - 250);
+    toast(`⚡ SOLAR FLARE LAUNCHED: Directed CME plasma stream aimed at ${targetBody.name}!`, 5000);
+  }
+
   function triggerSolarFlare(targetStar) {
     const star = targetStar || state.bodies.find((b) => b.texture === "sun" || b.scienceType === "star") || state.bodies[0];
     if (!star) return;
@@ -4600,9 +4681,39 @@ function drawMagnetosphere(body, radius) {
       if (body) createPlanetaryRingSystem(body);
     });
 
-    ui.triggerFlareBtn?.addEventListener("click", () => {
-      triggerSolarFlare();
-    });
+        const triggerBtn = document.getElementById("triggerFlareBtn");
+    if (triggerBtn) {
+      triggerBtn.addEventListener("click", () => {
+        openSolarFlareLauncher();
+      });
+    }
+
+    const closeFlareBtn = document.getElementById("closeFlareDialog");
+    if (closeFlareBtn) {
+      closeFlareBtn.addEventListener("click", () => {
+        document.getElementById("solarFlareDialog")?.close();
+      });
+    }
+
+    const flareRandomBtn = document.getElementById("flareRandomBtn");
+    if (flareRandomBtn) {
+      flareRandomBtn.addEventListener("click", () => {
+        document.getElementById("solarFlareDialog")?.close();
+        triggerSolarFlare();
+      });
+    }
+
+    const flareTargetBtn = document.getElementById("flareTargetBtn");
+    if (flareTargetBtn) {
+      flareTargetBtn.addEventListener("click", () => {
+        const select = document.getElementById("flareTargetSelect");
+        const targetId = select ? Number(select.value) : null;
+        const target = state.bodies.find(b => b.id === targetId);
+        document.getElementById("solarFlareDialog")?.close();
+        if (target) launchDirectedSolarFlare(target);
+        else triggerSolarFlare();
+      });
+    }
 
     window.addEventListener("pointerdown", () => SoundEngine.unlock(), { once: true });
     window.addEventListener("keydown", () => SoundEngine.unlock(), { once: true });
