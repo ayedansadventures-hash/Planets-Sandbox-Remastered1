@@ -374,27 +374,42 @@
       <button class="dialog-close" id="closeFlareDialog" aria-label="Close">×</button>
       <p class="eyebrow" style="color: #f59e0b;">CORONAL MASS EJECTION</p>
       <h2>⚡ Erupt Solar Flare / CME</h2>
-      <p style="color: #94a3b8; font-size: 11px; margin-bottom: 18px; line-height: 1.5;">Choose how you want to release high-energy solar plasma filaments into the solar system:</p>
+      <p style="color: #94a3b8; font-size: 12px; margin-bottom: 16px; line-height: 1.5;">Configure solar flare power, duration, and target destination:</p>
 
       <div style="display: flex; flex-direction: column; gap: 14px;">
-        <button id="flareRandomBtn" class="primary-button" style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <button id="flareRandomBtn" class="primary-button" style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px;">
           <span>🎲</span> Random Solar Prominence &amp; Eruption
         </button>
 
-        <div style="border-top: 1px solid rgba(148, 177, 230, 0.15); padding-top: 14px;">
-          <label class="stacked-field" style="margin-bottom: 12px;">
+        <div style="border-top: 1px solid rgba(148, 177, 230, 0.15); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+          <label class="stacked-field" style="font-size: 13px;">
             Target Specific Planet / World
-            <select id="flareTargetSelect">
+            <select id="flareTargetSelect" style="height: 38px; font-size: 13px; margin-top: 6px;">
               <!-- Populated dynamically -->
             </select>
           </label>
-          <button id="flareTargetBtn" class="action-button" style="width: 100%; min-height: 44px; justify-content: center; gap: 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.12);">
-            <span>🎯</span> Launch Directed Flare at Target
+
+          <div class="range-field" style="margin: 0;">
+            <div class="range-label" style="font-size: 12px;"><span>⚡ Flare Power / Intensity</span><output id="flarePowerValue">1.0×</output></div>
+            <input id="flarePower" type="range" min="1" max="10" step="0.5" value="1" />
+          </div>
+
+          <div class="range-field" style="margin: 0;">
+            <div class="range-label" style="font-size: 12px;"><span>⏳ Flare Duration / Waves</span><output id="flareDurationValue">6s</output></div>
+            <input id="flareDuration" type="range" min="3" max="30" step="1" value="6" />
+          </div>
+
+          <p style="font-size: 11px; color: #64748b; line-height: 1.4; margin: 0;">
+            💡 Extreme power or long duration will gradually deteriorate and strip away the target planet's magnetic shield, melting the crust into a procedural molten lava world!
+          </p>
+
+          <button id="flareTargetBtn" class="action-button" style="width: 100%; min-height: 46px; justify-content: center; gap: 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.15); font-size: 14px; font-weight: 600; margin-top: 4px;">
+            <span>🎯</span> Launch Directed Solar Flare
           </button>
         </div>
       </div>
     </dialog>
 
-    <script src="app.js?v=20260826_v12"></script>
+    <script src="app.js?v=20260826_v13"></script>
   </body>
 </html>

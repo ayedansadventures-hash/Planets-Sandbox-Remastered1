@@ -222,6 +222,7 @@
     audioEnabled: true,
     flareCooldown: 2.0,
     cmeParticles: [],
+    flareEmitter: null,
     camera: { x: 0, y: 0, zoom: 30 },
     followBodyId: null,
     pointer: { x: 0, y: 0, downX: 0, downY: 0, worldX: 0, worldY: 0, dragging: false, moved: false },
@@ -1581,10 +1582,12 @@ function integrate(dt) {
     }
   }
 
-  function updateEffects(realSeconds) {
+function updateEffects(realSeconds) {
     for (const effect of state.effects) {
       effect.life -= realSeconds;
-      if ("vx" in effect) {
+      if (effect.kind === "plasmaStream") {
+        effect.angle += (effect.angularSpeed || 2.0) * realSeconds;
+      } else if ("vx" in effect) {
         effect.x += effect.vx * realSeconds;
         effect.y += effect.vy * realSeconds;
         effect.vx *= effect.kind === "gas" ? .992 : .997;
@@ -1597,9 +1600,22 @@ function integrate(dt) {
     state.effects = state.effects.filter((effect) => effect.life > 0);
   }
 
-  function updateSolarPhenomena(dt) {
+function updateSolarPhenomena(dt) {
     if (!state.solarFlaresEnabled) return;
     state.flareCooldown -= dt;
+
+    // Process continuous directed flare emitter
+    if (state.flareEmitter && state.flareEmitter.remaining > 0) {
+      state.flareEmitter.remaining -= dt;
+      state.flareEmitter.spawnTimer += dt;
+      const star = state.bodies.find(b => b.id === state.flareEmitter.starId);
+      const target = state.bodies.find(b => b.id === state.flareEmitter.targetId);
+      if (star && target && state.flareEmitter.spawnTimer >= 0.08) {
+        state.flareEmitter.spawnTimer = 0;
+        spawnFlareParticles(star, target, state.flareEmitter.power, 6);
+      }
+      if (state.flareEmitter.remaining <= 0) state.flareEmitter = null;
+    }
 
     const stars = state.bodies.filter((b) => b.texture === "sun" || b.scienceType === "star" || b.mass * EARTHS_PER_SUN > 10000);
     for (const star of stars) {
@@ -1638,90 +1654,88 @@ function integrate(dt) {
         const dx = body.x - p.x;
         const dy = body.y - p.y;
         const dist = Math.hypot(dx, dy);
+        const power = p.power || 1.0;
         const magScale = Math.max(0, body.magneticScale ?? 1);
         const magnetosphereDist = (body.collisionRadius || 0.001) * (1.8 + Math.sqrt(magScale) * 3.8);
 
         if (dist <= magnetosphereDist) {
-          const magScale = Math.max(0, body.magneticScale ?? 1);
+          // Spawn curving orange plasma streamlines wrapping around the planet
+          for (let s = 0; s < 3; s++) {
+            const wrapAngle = Math.atan2(p.y - body.y, p.x - body.x) + (Math.random() - 0.5) * 1.4;
+            const wrapRadius = visualRadius(body) * (1.1 + Math.random() * 0.7);
+            const streamSpeed = (0.2 + Math.random() * 0.4);
+            state.effects.push({
+              kind: "plasmaStream",
+              bodyId: body.id,
+              angle: wrapAngle,
+              radius: wrapRadius,
+              angularSpeed: (Math.random() > 0.5 ? 1 : -1) * (1.8 + Math.random() * 2.5),
+              life: 1.2 + Math.random() * 1.5,
+              maxLife: 2.7,
+              size: 2.2 + Math.random() * 3.0,
+              color: Math.random() > 0.3 ? "#fb923c" : "#ea580c"
+            });
+          }
 
           if (magScale >= 0.5) {
-            // TIER 1: STRONG MAGNETIC FIELD (Earth, Jupiter, Saturn, Uranus, Neptune, custom magnetic worlds >= 0.5x)
-            // Complete magnetic deflection: ZERO scorching! Triggers intense shimmering auroras and bow shock deflection wave!
-            body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.65);
+            // TIER 1: SHIELDED MAGNETOSPHERE
+            body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.75);
             body.bowShockFlare = 1.0;
+
+            // Magnetic Sphere Deterioration under intense/long bombardment
+            const deterioration = 0.015 * power;
+            body.magneticScale = Math.max(0, body.magneticScale - deterioration);
+            if (body.magneticScale <= 0.05) {
+              body.magneticScale = 0;
+              toast(`⚠️ MAGNETOSPHERE STRIPPED: Extreme solar flare has eroded ${body.name}'s magnetic shield!`, 5000);
+            }
+            updateSelectionUI();
 
             if (!body.auroraNotified) {
               body.auroraNotified = true;
               toast(`🌌 GEOMAGNETIC AURORA: ${body.name}'s magnetic field deflected the solar flare, igniting brilliant polar auroras!`, 4500);
             }
-
-            // Deflected auroral plasma sparks
-            for (let s = 0; s < 2; s++) {
-              const ang = Math.random() * Math.PI * 2;
-              const spd = 0.12 + Math.random() * 0.35;
-              state.effects.push({
-                kind: "spark",
-                x: p.x,
-                y: p.y,
-                vx: (p.vx * 0.25) + Math.cos(ang) * spd,
-                vy: (p.vy * 0.25) + Math.sin(ang) * spd,
-                life: 0.8 + Math.random() * 0.7,
-                maxLife: 1.5,
-                size: 2.0 + Math.random() * 2.2,
-                color: Math.random() > 0.5 ? "#4ade80" : "#a855f7"
-              });
-            }
           } else if (magScale > 0.05 && magScale < 0.5) {
-            // TIER 2: WEAK MAGNETIC FIELD (Mars 0.1x, weak crustal worlds)
-            // Partial shielding: Mild warming and radiation, slight auroral flicker, NO heavy scorching!
+            // TIER 2: WEAK MAGNETIC FIELD
             const weakFactor = (0.5 - magScale) / 0.45;
-            body.temperatureKelvin = (body.temperatureKelvin || 210) + 14.0 * weakFactor;
-            body.radiumDose = (body.radiumDose || 0.12) + 3.0 * weakFactor;
-            body.auroraExcitement = Math.min(0.65, (body.auroraExcitement || 0) + 0.3);
+            body.temperatureKelvin = (body.temperatureKelvin || 210) + 18.0 * weakFactor * power;
+            body.radiumDose = (body.radiumDose || 0.12) + 4.0 * weakFactor * power;
+            body.auroraExcitement = Math.min(0.65, (body.auroraExcitement || 0) + 0.35);
+
+            // Progressive deterioration
+            body.magneticScale = Math.max(0, body.magneticScale - 0.02 * power);
+            if (body.magneticScale <= 0.05) {
+              body.magneticScale = 0;
+              toast(`⚠️ MAGNETOSPHERE COLLAPSED: ${body.name}'s weak magnetic shield has dissipated!`, 4500);
+            }
+            updateSelectionUI();
 
             if (!body.weakShieldNotified) {
               body.weakShieldNotified = true;
               toast(`⚡ IONOSPHERIC DISTURBANCE: ${body.name}'s weak magnetic field partially absorbed solar flare energy.`, 4000);
             }
-
-            for (let s = 0; s < 2; s++) {
-              const ang = Math.random() * Math.PI * 2;
-              const spd = 0.1 + Math.random() * 0.25;
-              state.effects.push({
-                kind: "spark",
-                x: p.x,
-                y: p.y,
-                vx: (p.vx * 0.2) + Math.cos(ang) * spd,
-                vy: (p.vy * 0.2) + Math.sin(ang) * spd,
-                life: 0.7 + Math.random() * 0.6,
-                maxLife: 1.3,
-                size: 1.8 + Math.random() * 1.5,
-                color: "#f59e0b"
-              });
-            }
           } else {
-            // TIER 3: ZERO / AIRLESS UNPROTECTED MAGNETIC FIELD (Mercury, Moon, Venus, airless bodies, magScale <= 0.05)
-            // Direct severe scorching! Surface burns into orangey-grayish crust with thermal fractures!
-            body.temperatureKelvin = (body.temperatureKelvin || 288) + 45.0;
-            body.radiumDose = (body.radiumDose || 0.12) + 9.5;
-            body.scorchLevel = clamp((body.scorchLevel || 0) + 0.18, 0, 1.0);
+            // TIER 3: ZERO / STRIPPED MAGNETIC FIELD -> SCORCH & PROCEDURAL LAVA WORLD TRANSFORMATION
+            body.temperatureKelvin = (body.temperatureKelvin || 288) + 45.0 * power;
+            body.radiumDose = (body.radiumDose || 0.12) + 12.5 * power;
+            body.scorchLevel = clamp((body.scorchLevel || 0) + 0.15 * power, 0, 1.0);
 
-            if (!body.name.startsWith("Scorched ")) {
-              body.originalName = body.originalName || body.name;
-              body.name = `Scorched ${body.originalName}`;
-            }
-
-            if (body.science) {
-              body.science.summary = "Solar flare bombarded scorched world with burnt crust and extreme radiation.";
-              body.science.temperature = `${Math.round(body.temperatureKelvin - 273.15)} °C (Scorched)`;
-            }
-
-            if (!body.scorchNotified) {
+            if (body.scorchLevel >= 0.45 || body.temperatureKelvin > 800) {
+              body.isLavaWorld = true;
+              if (body.science) {
+                body.science.summary = "Molten Lava World — Magnetosphere stripped by solar flare; crust superheated into convective magma oceans and volcanic basalt plates.";
+                body.science.temperature = `${Math.round(body.temperatureKelvin - 273.15)} °C (Molten Lava)`;
+              }
+              if (!body.lavaNotified) {
+                body.lavaNotified = true;
+                toast(`🔥 MOLTEN LAVA WORLD: Severe solar flare superheated ${body.name}'s surface into a glowing molten magma planet!`, 5500);
+              }
+            } else if (!body.scorchNotified) {
               body.scorchNotified = true;
               toast(`🔥 SOLAR FLARE STRIKE: CME particles slammed into ${body.name}'s unshielded surface, scorching the terrain!`, 5000);
             }
 
-            // Molten impact sparks
+            // Molten volcanic ejecta sparks
             for (let s = 0; s < 3; s++) {
               const spd = 0.15 + Math.random() * 0.45;
               const ang = Math.random() * Math.PI * 2;
@@ -1734,7 +1748,7 @@ function integrate(dt) {
                 life: 0.9 + Math.random() * 0.9,
                 maxLife: 1.8,
                 size: 2.2 + Math.random() * 3.0,
-                color: body.temperatureKelvin > 1000 ? "#ff4500" : "#ea580c"
+                color: body.temperatureKelvin > 1000 ? "#ff3b00" : "#fb923c"
               });
             }
           }
@@ -1939,12 +1953,27 @@ function integrate(dt) {
     toast(`Spawned dynamic ring system of orbiting particles around ${targetPlanet.name}!`, 4500);
   }
 
-  function openSolarFlareLauncher() {
+function openSolarFlareLauncher() {
     const dialog = document.getElementById("solarFlareDialog");
     const targetSelect = document.getElementById("flareTargetSelect");
+    const powerSlider = document.getElementById("flarePower");
+    const powerValue = document.getElementById("flarePowerValue");
+    const durationSlider = document.getElementById("flareDuration");
+    const durationValue = document.getElementById("flareDurationValue");
+
     if (!dialog) {
       triggerSolarFlare();
       return;
+    }
+
+    if (powerSlider && powerValue) {
+      powerValue.value = `${parseFloat(powerSlider.value).toFixed(1)}×`;
+      powerSlider.oninput = () => { powerValue.value = `${parseFloat(powerSlider.value).toFixed(1)}×`; };
+    }
+
+    if (durationSlider && durationValue) {
+      durationValue.value = `${durationSlider.value}s`;
+      durationSlider.oninput = () => { durationValue.value = `${durationSlider.value}s`; };
     }
 
     if (targetSelect) {
@@ -1974,7 +2003,7 @@ function integrate(dt) {
     }
   }
 
-  function launchDirectedSolarFlare(targetBody) {
+  function launchDirectedSolarFlare(targetBody, power = 1.0, duration = 6.0) {
     const star = state.bodies.find((b) => b.texture === "sun" || b.scienceType === "star") || state.bodies[0];
     if (!star || !targetBody) {
       triggerSolarFlare();
@@ -1984,23 +2013,40 @@ function integrate(dt) {
     SoundEngine.playSolarFlare();
     const targetAngle = Math.atan2(targetBody.y - star.y, targetBody.x - star.x);
 
+    // Create prominent magnetic loops on the sun facing the target
     if (!star.prominences) star.prominences = [];
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < Math.min(6, 3 + Math.floor(power * 0.5)); k++) {
       star.prominences.push({
-        baseAngle: targetAngle - 0.25 + k * 0.16,
+        baseAngle: targetAngle - 0.28 + k * 0.14,
         span: 0.25 + Math.random() * 0.25,
-        height: 0.7 + Math.random() * 0.9,
-        pulseSpeed: 1.5 + Math.random() * 2.0,
+        height: 0.8 + power * 0.2 + Math.random() * 0.8,
+        pulseSpeed: 1.5 + Math.random() * 2.5,
         life: 0.01,
-        maxLife: 5.0
+        maxLife: Math.max(5.0, duration * 0.8)
       });
     }
 
-    const numParticles = 54;
-    for (let i = 0; i < numParticles; i++) {
-      const spread = (Math.random() - 0.5) * 0.24;
+    // Set active continuous flare emitter
+    state.flareEmitter = {
+      starId: star.id,
+      targetId: targetBody.id,
+      power,
+      duration,
+      remaining: duration,
+      spawnTimer: 0
+    };
+
+    // Initial plasma burst
+    spawnFlareParticles(star, targetBody, power, 45);
+    toast(`⚡ SOLAR FLARE LAUNCHED (${power.toFixed(1)}× Power, ${duration}s): CME plasma torrent directed at ${targetBody.name}!`, 5000);
+  }
+
+  function spawnFlareParticles(star, targetBody, power, count) {
+    const targetAngle = Math.atan2(targetBody.y - star.y, targetBody.x - star.x);
+    for (let i = 0; i < count; i++) {
+      const spread = (Math.random() - 0.5) * (0.28 + (1 / Math.max(1, power)) * 0.1);
       const angle = targetAngle + spread;
-      const speed = 7.5 * (0.8 + Math.random() * 0.4);
+      const speed = (7.0 + power * 1.2) * (0.8 + Math.random() * 0.4);
 
       state.cmeParticles.push({
         x: star.x + Math.cos(angle) * (star.collisionRadius * 1.5),
@@ -2009,15 +2055,14 @@ function integrate(dt) {
         vy: star.vy + Math.sin(angle) * speed,
         life: 8.5 + Math.random() * 4.0,
         maxLife: 12.5,
-        size: 3.5 + Math.random() * 4.5,
+        size: (3.2 + power * 0.6) + Math.random() * 3.5,
         color: Math.random() > 0.4 ? "#fb923c" : "#fed7aa",
         originId: star.id,
-        targetId: targetBody.id
+        targetId: targetBody.id,
+        power
       });
     }
-
-    if (state.cmeParticles.length > 250) state.cmeParticles.splice(0, state.cmeParticles.length - 250);
-    toast(`⚡ SOLAR FLARE LAUNCHED: Directed CME plasma stream aimed at ${targetBody.name}!`, 5000);
+    if (state.cmeParticles.length > 350) state.cmeParticles.splice(0, state.cmeParticles.length - 350);
   }
 
   function triggerSolarFlare(targetStar) {
@@ -2727,31 +2772,76 @@ function drawMagnetosphere(body, radius) {
       drawTexture(body, radius);
     }
 
-    // Render Scorched Orangey-Grayish Crust Shader when bombarded by solar flares
-    if (body.scorchLevel && body.scorchLevel > 0) {
+// Render Dynamic Procedural Molten Lava World Shader
+    if (body.isLavaWorld || (body.scorchLevel && body.scorchLevel >= 0.45 && body.texture !== "sun" && body.texture !== "blackHole")) {
+      const time = performance.now() * 0.0018;
+      const seed = (body.id || 1) * 31.4159;
+
+      // 1. Incandescent Glowing Magma Ocean Layer
+      const magmaGrad = ctx.createRadialGradient(-radius * 0.25, -radius * 0.25, radius * 0.05, 0, 0, radius * 1.02);
+      magmaGrad.addColorStop(0, "rgba(255, 243, 128, 0.98)"); // white-hot core
+      magmaGrad.addColorStop(0.25, "rgba(255, 107, 0, 0.95)"); // fiery orange
+      magmaGrad.addColorStop(0.65, "rgba(220, 38, 38, 0.92)");  // molten crimson
+      magmaGrad.addColorStop(1, "rgba(69, 10, 10, 0.95)");     // deep cooling magma
+
+      ctx.fillStyle = magmaGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. Procedural Volcanic Basalt Tectonic Plates (dark cooling crust)
+      ctx.save();
+      ctx.fillStyle = "rgba(24, 20, 18, 0.94)";
+      ctx.strokeStyle = "rgba(255, 140, 0, 0.85)";
+      ctx.lineWidth = Math.max(0.8, radius * 0.035);
+      ctx.shadowColor = "#ff4500";
+      ctx.shadowBlur = Math.max(2, radius * 0.15);
+
+      const numPlates = 7;
+      for (let p = 0; p < numPlates; p++) {
+        const plateAng = seed + p * (Math.PI * 2 / numPlates) + Math.sin(time * 0.5 + p) * 0.08;
+        const plateDist = radius * (0.35 + (p % 3) * 0.18);
+        const px = Math.cos(plateAng) * plateDist;
+        const py = Math.sin(plateAng) * plateDist;
+        const plateRadius = radius * (0.28 + (p % 2) * 0.12);
+
+        ctx.beginPath();
+        ctx.arc(px, py, plateRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 3. Glowing Convective Lava Rivers & Thermal Fissures
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 235, 150, 0.92)";
+      ctx.lineWidth = Math.max(0.9, radius * 0.028);
+      ctx.shadowColor = "#ff6b00";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const ang = seed * 1.7 + k * 1.05 + Math.cos(time + k) * 0.12;
+        const fx = Math.cos(ang) * radius * 0.8;
+        const fy = Math.sin(ang) * radius * 0.8;
+        const midX = Math.cos(ang + 0.6) * radius * 0.35;
+        const midY = Math.sin(ang + 0.6) * radius * 0.35;
+        ctx.moveTo(fx, fy);
+        ctx.quadraticCurveTo(midX, midY, -fx * 0.6, -fy * 0.6);
+      }
+      ctx.stroke();
+      ctx.restore();
+    } else if (body.scorchLevel && body.scorchLevel > 0) {
+      // Scorched Silicate World
       const scorchGrad = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, radius * 0.1, 0, 0, radius * 1.02);
-      scorchGrad.addColorStop(0, "rgba(251, 146, 60, 0.65)"); // orangey heat core
-      scorchGrad.addColorStop(0.4, "rgba(194, 65, 12, 0.72)");  // burnt orange-brown
-      scorchGrad.addColorStop(0.75, "rgba(75, 45, 30, 0.78)"); // dark scorched silicate crust
-      scorchGrad.addColorStop(1, "rgba(35, 25, 20, 0.85)");    // dark rim
+      scorchGrad.addColorStop(0, "rgba(251, 146, 60, 0.65)");
+      scorchGrad.addColorStop(0.4, "rgba(194, 65, 12, 0.72)");
+      scorchGrad.addColorStop(0.75, "rgba(75, 45, 30, 0.78)");
+      scorchGrad.addColorStop(1, "rgba(35, 25, 20, 0.85)");
 
       ctx.fillStyle = scorchGrad;
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.fill();
-
-      // Scorched impact fractures and glowing thermal fissures
-      ctx.strokeStyle = "rgba(254, 215, 170, 0.45)";
-      ctx.lineWidth = Math.max(0.7, radius * 0.025);
-      ctx.beginPath();
-      for (let k = 0; k < 4; k++) {
-        const ang = (body.id || 1) * 1.5 + k * 1.6;
-        const fx = Math.cos(ang) * radius * 0.55;
-        const fy = Math.sin(ang) * radius * 0.55;
-        ctx.moveTo(fx, fy);
-        ctx.lineTo(fx + Math.cos(ang + 0.8) * radius * 0.35, fy + Math.sin(ang + 0.8) * radius * 0.35);
-      }
-      ctx.stroke();
     }
 
     // Render dynamic Thermal Heating, Molten Magma, & Radium Glow on overheated planets
@@ -3269,6 +3359,32 @@ function drawMagnetosphere(body, radius) {
 
   function drawEffects() {
     for (const effect of state.effects) {
+      if (effect.kind === "plasmaStream") {
+        const body = state.bodies.find(b => b.id === effect.bodyId);
+        if (!body) continue;
+        const p = bodyDisplayPoint(body);
+        const alpha = clamp(effect.life / effect.maxLife, 0, 1);
+        const radius = visualRadius(body);
+        const r = radius * (1.1 + (effect.radius || radius) * 0.015);
+        const ang = effect.angle;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        ctx.strokeStyle = `rgba(251, 146, 60, ${alpha * 0.85})`;
+        ctx.lineWidth = Math.max(1.2, effect.size * 0.8);
+        ctx.shadowColor = "#f97316";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, ang - 0.35, ang + 0.35);
+        ctx.stroke();
+
+        ctx.fillStyle = `rgba(254, 215, 170, ${alpha * 0.95})`;
+        ctx.beginPath();
+        ctx.arc(p.x + Math.cos(ang + 0.35) * r, p.y + Math.sin(ang + 0.35) * r, effect.size * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
       const p = worldToScreen(effect.x, effect.y);
       const alpha = clamp(effect.life / effect.maxLife, 0, 1);
       ctx.save();
@@ -4707,10 +4823,14 @@ function drawMagnetosphere(body, radius) {
     if (flareTargetBtn) {
       flareTargetBtn.addEventListener("click", () => {
         const select = document.getElementById("flareTargetSelect");
+        const powerSlider = document.getElementById("flarePower");
+        const durationSlider = document.getElementById("flareDuration");
         const targetId = select ? Number(select.value) : null;
+        const power = powerSlider ? parseFloat(powerSlider.value) : 1.0;
+        const duration = durationSlider ? parseFloat(durationSlider.value) : 6.0;
         const target = state.bodies.find(b => b.id === targetId);
         document.getElementById("solarFlareDialog")?.close();
-        if (target) launchDirectedSolarFlare(target);
+        if (target) launchDirectedSolarFlare(target, power, duration);
         else triggerSolarFlare();
       });
     }
