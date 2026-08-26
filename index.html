@@ -370,6 +370,31 @@
       <p class="dialog-note">Created by Ayedan in collaboration with OpenAI Codex &amp; Google DeepMind Antigravity AI.<br />Tip: Evolution of the Solar System preset shows the solar system's history from nebula to the 5th giant ejection, present day, and future red giant.</p>
     </dialog>
 
+    <dialog id="solarFlareDialog">
+      <button class="dialog-close" id="closeFlareDialog" aria-label="Close">×</button>
+      <p class="eyebrow" style="color: #f59e0b;">CORONAL MASS EJECTION</p>
+      <h2>⚡ Erupt Solar Flare / CME</h2>
+      <p style="color: #94a3b8; font-size: 11px; margin-bottom: 18px; line-height: 1.5;">Choose how you want to release high-energy solar plasma filaments into the solar system:</p>
+
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <button id="flareRandomBtn" class="primary-button" style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <span>🎲</span> Random Solar Prominence &amp; Eruption
+        </button>
+
+        <div style="border-top: 1px solid rgba(148, 177, 230, 0.15); padding-top: 14px;">
+          <label class="stacked-field" style="margin-bottom: 12px;">
+            Target Specific Planet / World
+            <select id="flareTargetSelect">
+              <!-- Populated dynamically -->
+            </select>
+          </label>
+          <button id="flareTargetBtn" class="action-button" style="width: 100%; min-height: 44px; justify-content: center; gap: 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.12);">
+            <span>🎯</span> Launch Directed Flare at Target
+          </button>
+        </div>
+      </div>
+    </dialog>
+
     <script src="app.js?v=20260819_8"></script>
   </body>
 </html>

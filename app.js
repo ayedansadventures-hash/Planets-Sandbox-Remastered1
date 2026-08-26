@@ -1068,22 +1068,76 @@ return {
     return acceleration;
   }
 
-  function integrate(dt) {
+function integrate(dt) {
     const acceleration = computeAccelerations();
+    
+    // 1. First leapfrog half-step for all primary bodies
     for (let i = 0; i < state.bodies.length; i++) {
       const body = state.bodies[i];
-      body.vx += acceleration[i].x * dt * .5;
-      body.vy += acceleration[i].y * dt * .5;
-      body.prevX = body.x;
-      body.prevY = body.y;
-      body.x += body.vx * dt;
-      body.y += body.vy * dt;
+      if (!body.isMoon) {
+        body.vx += acceleration[i].x * dt * 0.5;
+        body.vy += acceleration[i].y * dt * 0.5;
+        body.prevX = body.x;
+        body.prevY = body.y;
+        body.x += body.vx * dt;
+        body.y += body.vy * dt;
+      }
     }
+
+    // 2. Hierarchical relative 2-body integration for natural satellites (moons)
+    for (let i = 0; i < state.bodies.length; i++) {
+      const body = state.bodies[i];
+      if (body.isMoon && body.parentId) {
+        const parent = state.bodies.find(b => b.id === body.parentId);
+        if (parent) {
+          body.prevX = body.x;
+          body.prevY = body.y;
+          
+          let relX = body.x - (parent.prevX ?? parent.x);
+          let relY = body.y - (parent.prevY ?? parent.y);
+          let relVx = body.vx - (parent.vx || 0);
+          let relVy = body.vy - (parent.vy || 0);
+          
+          const mu = G * (parent.gravityScale ?? 1) * (body.gravityScale ?? 1) * (parent.mass + body.mass);
+          const subSteps = 6;
+          const subDt = dt / subSteps;
+          
+          for (let s = 0; s < subSteps; s++) {
+            const rSq = relX * relX + relY * relY + 1e-12;
+            const invR3 = 1 / (Math.sqrt(rSq) * rSq);
+            const aX = -mu * relX * invR3;
+            const aY = -mu * relY * invR3;
+            
+            relVx += aX * subDt;
+            relVy += aY * subDt;
+            relX += relVx * subDt;
+            relY += relVy * subDt;
+          }
+          
+          body.x = parent.x + relX;
+          body.y = parent.y + relY;
+          body.vx = parent.vx + relVx;
+          body.vy = parent.vy + relVy;
+        } else {
+          // Fallback if parent missing
+          body.vx += acceleration[i].x * dt * 0.5;
+          body.vy += acceleration[i].y * dt * 0.5;
+          body.x += body.vx * dt;
+          body.y += body.vy * dt;
+        }
+      }
+    }
+
+    // 3. Second leapfrog half-step for primary non-moon bodies
     const nextAcceleration = computeAccelerations();
     for (let i = 0; i < state.bodies.length; i++) {
-      state.bodies[i].vx += nextAcceleration[i].x * dt * .5;
-      state.bodies[i].vy += nextAcceleration[i].y * dt * .5;
+      const body = state.bodies[i];
+      if (!body.isMoon) {
+        body.vx += nextAcceleration[i].x * dt * 0.5;
+        body.vy += nextAcceleration[i].y * dt * 0.5;
+      }
     }
+
     resolveCollisions();
     resolveTidalDisruptions(dt);
   }
@@ -2118,38 +2172,45 @@ return {
     };
   }
 
-  function drawOrbitGuides() {
+function drawOrbitGuides() {
     if (!state.showOrbits) return;
     for (const body of state.bodies) {
       if (!body.orbit) continue;
       const parent = state.bodies.find((candidate) => candidate.id === body.orbit.parentId);
       if (!parent) continue;
-      const liveOrbit = osculatingOrbit(body, parent) || body.orbit;
-      const a = Number.isFinite(liveOrbit.a) && liveOrbit.a > 0 ? liveOrbit.a : body.orbit.a;
-      if (!Number.isFinite(a) || a <= 0) continue;
-      const e = clamp(liveOrbit.e ?? body.orbit.e ?? 0, 0, .88);
+
       if (body.isMoon) {
+        // Moon orbit guide around parent planet
         const parentPoint = worldToScreen(parent.x, parent.y);
-        const displayPoint = bodyDisplayPoint(body);
-        const physicalPoint = worldToScreen(body.x, body.y);
-        const displayDistance = Math.hypot(displayPoint.x - parentPoint.x, displayPoint.y - parentPoint.y);
-        const physicalDistance = Math.hypot(physicalPoint.x - parentPoint.x, physicalPoint.y - parentPoint.y);
-        if (displayDistance > physicalDistance + 1) {
-          ctx.strokeStyle = body === selectedBody() || parent === selectedBody() ? "rgba(129,190,255,.34)" : "rgba(151,181,220,.13)";
-          ctx.lineWidth = body === selectedBody() ? 1.2 : .7;
-          ctx.setLineDash([3, 4]);
-          ctx.beginPath(); ctx.arc(parentPoint.x, parentPoint.y, displayDistance, 0, Math.PI * 2); ctx.stroke();
-          ctx.setLineDash([]);
-          continue;
-        }
+        const a = body.orbit.a;
+        if (!Number.isFinite(a) || a <= 0 || a * state.camera.zoom < 2) continue;
+        const e = clamp(body.orbit.e || 0, 0, 0.88);
+        const b = a * Math.sqrt(1 - e * e);
+        const angle = body.orbit.angle || 0;
+        const center = worldToScreen(parent.x - Math.cos(angle) * a * e, parent.y - Math.sin(angle) * a * e);
+
+        ctx.save();
+        ctx.strokeStyle = body === selectedBody() || parent === selectedBody() ? "rgba(147, 197, 253, 0.45)" : "rgba(151, 181, 220, 0.16)";
+        ctx.lineWidth = body === selectedBody() ? 1.2 : 0.7;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        ctx.ellipse(center.x, center.y, a * state.camera.zoom, b * state.camera.zoom, angle, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        continue;
       }
+
+      // Primary Planet orbit guide around the Sun (drawn from true Keplerian elements)
+      const a = body.orbit.a;
+      if (!Number.isFinite(a) || a <= 0 || a * state.camera.zoom < 3) continue;
+      const e = clamp(body.orbit.e || 0, 0, 0.88);
       const b = a * Math.sqrt(1 - e * e);
-      if (a * state.camera.zoom < 3) continue;
-      const angle = liveOrbit.angle || body.orbit.angle || 0;
+      const angle = body.orbit.angle || 0;
       const center = worldToScreen(parent.x - Math.cos(angle) * a * e, parent.y - Math.sin(angle) * a * e);
+
       ctx.save();
-      ctx.strokeStyle = body.isMoon ? "rgba(151,181,220,.18)" : body.name.includes("Mercury") ? "rgba(180,170,160,.45)" : "rgba(104,155,224,.24)";
-      ctx.lineWidth = body === selectedBody() ? 1.4 : .8;
+      ctx.strokeStyle = body === selectedBody() ? "rgba(147, 197, 253, 0.85)" : "rgba(104, 155, 224, 0.28)";
+      ctx.lineWidth = body === selectedBody() ? 1.4 : 0.8;
       ctx.setLineDash(body === selectedBody() ? [5, 4] : []);
       ctx.beginPath();
       ctx.ellipse(center.x, center.y, a * state.camera.zoom, b * state.camera.zoom, angle, 0, Math.PI * 2);
@@ -3015,7 +3076,7 @@ function drawMagnetosphere(body, radius) {
     }
 
     if (body.auroraExcitement > 0) {
-      body.auroraExcitement = Math.max(0, body.auroraExcitement - 0.008);
+      body.auroraExcitement = Math.max(0, body.auroraExcitement - 0.0015);
       const excitement = body.auroraExcitement;
       if (excitement > 0.01 && (body.magneticScale ?? 1) > 0.02) {
         ctx.save();
