@@ -8,7 +8,7 @@
   const AU_YEAR_TO_KM_S = KM_PER_AU / (365.25 * 86400);
   const EARTH_RADIUS_AU = 6371 / KM_PER_AU;
   const MAX_BODIES = 80;
-  const ROCHE_GAMEPLAY_SCALE = 4;
+  const ROCHE_GAMEPLAY_SCALE = 1.0;
   const BINARY_MASS_RATIO = .25;
   const canvas = document.querySelector("#spaceCanvas");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -390,7 +390,7 @@
     const mass = Math.max(1e-12, data.mass ?? .1) / EARTHS_PER_SUN;
     const radius = data.radius || .035;
     const collisionRadius = data.collisionRadius || (data.radiusKm ? data.radiusKm / KM_PER_AU : estimatedCollisionRadius(data.mass ?? .1, data.texture));
-    return {
+return {
       id: state.idCounter++,
       name: data.name || `Body ${state.idCounter}`,
       x: data.x || 0,
@@ -409,19 +409,20 @@
       naturalColor: data.naturalColor || data.color || "#9cb8d8",
       texture: data.texture || "rock",
       ring: Boolean(data.ring),
-            ringScale: Math.max(1, data.ringScale ?? 1),
-      bandCount: data.bandCount !== undefined ? data.bandCount : (data.texture === "jupiter" ? 8 : data.texture === "saturn" ? 6 : (data.scienceType === "gasGiant" ? 6 : 0)),
-      bandPalette: data.bandPalette || (data.texture === "jupiter" ? "jupiterGold" : "custom"),
-      bandColors: data.bandColors ? [...data.bandColors] : (data.texture === "jupiter" ? ["#78350f", "#b45309", "#d97706", "#fde68a"] : ["#6b21a8", "#9333ea", "#c084fc", "#3b82f6"]),
+      ringScale: Math.max(1, data.ringScale ?? 1),
+      bandCount: data.bandCount !== undefined ? data.bandCount : 0,
+      bandPalette: data.bandPalette || "custom",
+      bandColors: data.bandColors ? [...data.bandColors] : ["#78350f", "#b45309", "#d97706", "#fde68a"],
       stormColor: data.stormColor || "#f43f5e",
       bandTurbulence: data.bandTurbulence ?? 50,
-      showGreatStorm: data.showGreatStorm !== undefined ? Boolean(data.showGreatStorm) : (data.texture === "jupiter"),
-      waterCoverage: data.waterCoverage !== undefined ? data.waterCoverage : (data.texture === "earth" ? 71 : (data.name && data.name.includes("Water") ? 100 : (data.scienceType === "planet" ? 40 : 0))),
+      showGreatStorm: Boolean(data.showGreatStorm),
+      waterCoverage: data.waterCoverage !== undefined ? data.waterCoverage : (data.name && data.name.includes("Water") ? 100 : 0),
       oceanColor: data.oceanColor || "#1d4ed8",
       landColor: data.landColor || "#15803d",
-      iceCapCoverage: data.iceCapCoverage !== undefined ? data.iceCapCoverage : (data.texture === "earth" ? 18 : (data.texture === "ice" ? 45 : 0)),
-      gasType: data.gasType || (data.texture === "earth" ? "earthAir" : data.texture === "venus" ? "carbonDioxide" : data.texture === "jupiter" ? "hydrogenHelium" : data.texture === "neptune" ? "methane" : "earthAir"),
-      atmoPressure: data.atmoPressure !== undefined ? data.atmoPressure : (data.texture === "earth" ? 1.0 : data.texture === "venus" ? 92.0 : data.texture === "mars" ? 0.006 : data.texture === "jupiter" ? 10.0 : 1.0),
+      iceCapCoverage: data.iceCapCoverage !== undefined ? data.iceCapCoverage : 0,
+      customAtmosphere: Boolean(data.customAtmosphere),
+      gasType: data.gasType || "none",
+      atmoPressure: data.atmoPressure !== undefined ? data.atmoPressure : 1.0,
       atmoColor: data.atmoColor || "#60a5fa",
       atmoHaze: data.atmoHaze !== undefined ? data.atmoHaze : 60,
       scienceType: data.scienceType || (data.texture === "sun" ? "star" : data.texture === "ice" ? "ice" : "rock"),
@@ -430,9 +431,9 @@
       isMoon: Boolean(data.isMoon),
       isBlackHole: Boolean(data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
       accretionDisk: Boolean(data.accretionDisk || data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
-      tidalImmune: Boolean(data.tidalImmune),
-      tidalStress: clamp(data.tidalStress ?? 0, 0, 1),
-      tidalPrimaryId: data.tidalPrimaryId ?? null,
+      tidalImmune: Boolean(data.tidalImmune || data.isMoon || data.parentId),
+      tidalStress: 0,
+      tidalPrimaryId: null,
       binaryPartnerId: data.binaryPartnerId ?? null,
       orbit: data.orbit ? { ...data.orbit } : null,
       trail: [],
@@ -1437,7 +1438,7 @@
         const b = state.bodies[j];
         const primary = a.mass >= b.mass ? a : b;
         const vulnerable = primary === a ? b : a;
-        if (vulnerable.tidalImmune) continue;
+        if (vulnerable.tidalImmune || vulnerable.isMoon || vulnerable.parentId) continue;
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
         const limit = rocheLimit(primary, vulnerable.mass, vulnerable.collisionRadius, vulnerable.gravityScale);
         if (dist > limit) continue;
@@ -1868,11 +1869,13 @@
 
 
     const shortestPeriod = state.bodies.reduce((shortest, body) => {
-      if (!body.orbit || body.isMoon) return shortest;
+      if (!body.orbit) return shortest;
       const parent = state.bodies.find((candidate) => candidate.id === body.orbit.parentId);
       if (!parent || !body.orbit.a) return shortest;
       const period = Math.sqrt(body.orbit.a ** 3 / Math.max(pairGravityMass(parent, body), 1e-15));
-      return Math.min(shortest, period);
+      // Clamp moon minimum step to prevent excessive slowdown while ensuring stability
+      const effectivePeriod = body.isMoon ? Math.max(period, 0.005) : period;
+      return Math.min(shortest, effectivePeriod);
     }, Infinity);
 
     const minStarDist = state.bodies.reduce((minD, b) => {
@@ -2245,9 +2248,10 @@
   }
 
   function drawMagnetosphere(body, radius) {
+    const isSelected = state.selectedId === body.id || state.hoveredId === body.id;
+    if (!isSelected) return;
     const strength = Math.max(0, body.magneticScale ?? 1);
     if (strength <= 0.05) return;
-    const isSelected = state.selectedId === body.id || state.hoveredId === body.id;
     const reach = radius * (1.6 + Math.sqrt(strength) * 1.8);
     const opacity = isSelected ? clamp(0.25 + Math.log10(strength + 1) * 0.25, 0.2, 0.85) : clamp(0.08 + Math.log10(strength + 1) * 0.12, 0.08, 0.45);
 
@@ -2520,9 +2524,10 @@
     ctx.restore();
     drawAtmosphereAndAurora(body, radius);
     if (body.ring) drawRing(body, radius, false);
-    ctx.strokeStyle = "rgba(255,255,255,.22)";
-    ctx.lineWidth = .7;
-    ctx.beginPath(); ctx.arc(0, 0, radius - .3, 0, Math.PI * 2); ctx.stroke();
+    // Crisp black limb silhouette outline
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
+    ctx.lineWidth = Math.max(0.8, radius * 0.035);
+    ctx.beginPath(); ctx.arc(0, 0, radius - 0.2, 0, Math.PI * 2); ctx.stroke();
     drawStarDiffractionSpikes(body, radius, p);
     if (state.selectedId === body.id) {
       ctx.strokeStyle = "rgba(115,183,255,.88)";
@@ -2871,7 +2876,7 @@
   }
 
   function drawAtmosphereAndAurora(body, radius) {
-    if (body.gasType && body.gasType !== "none" && radius >= 5) {
+    if (body.customAtmosphere && body.gasType && body.gasType !== "none" && radius >= 5) {
       const atmoColor = body.atmoColor || "#60a5fa";
       const haze = (body.atmoHaze ?? 60) / 100;
       const pressure = body.atmoPressure ?? 1.0;
@@ -2881,23 +2886,12 @@
       ctx.strokeStyle = atmoColor;
       ctx.lineWidth = atmoThickness;
       ctx.shadowColor = atmoColor;
-      ctx.shadowBlur = Math.max(3, radius * 0.25 * haze);
+      ctx.shadowBlur = Math.max(2, radius * 0.2 * haze);
       ctx.globalAlpha = clamp(0.3 + haze * 0.6, 0.2, 0.95);
       ctx.beginPath();
       ctx.arc(0, 0, radius + atmoThickness * 0.4, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
-    } else if (state.auroraEnabled) {
-      const style = atmosphereStyles[body.texture];
-      if (style && radius >= 5) {
-        ctx.save();
-        ctx.strokeStyle = style[0];
-        ctx.lineWidth = Math.max(.7, radius * style[1]);
-        ctx.shadowColor = style[0];
-        ctx.shadowBlur = Math.max(2, radius * .18);
-        ctx.beginPath(); ctx.arc(0, 0, radius + ctx.lineWidth * .45, 0, Math.PI * 2); ctx.stroke();
-        ctx.restore();
-      }
     }
 
     if (body.auroraExcitement > 0) {
