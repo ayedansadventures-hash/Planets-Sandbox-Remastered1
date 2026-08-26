@@ -256,7 +256,7 @@
 
   const scienceByName = {
     Sun: { className: "G-type star", summary: "Main-sequence stellar body", composition: "Hydrogen 73%, helium 25%", atmosphere: "Photosphere and corona", temperature: "5,500 °C surface", density: "1.41 g/cm³", magnetic: 8, magneticLabel: "Variable · ~2× Earth", magneticNote: "A dynamic field drives sunspots, flares, and solar wind." },
-    Mercury: { className: "Terrestrial planet", summary: "Small iron-rich world", composition: "Iron core, silicate crust", atmosphere: "Extremely thin exosphere", temperature: "−180 to 430 °C", density: "5.43 g/cm³", magnetic: .01, magneticLabel: "0.01× Earth", magneticNote: "A weak but measurable global magnetic field." },
+    Mercury: { className: "Terrestrial planet", summary: "Small airless iron-rich world", composition: "Iron core, silicate crust", atmosphere: "None / Vacuum", temperature: "−180 to 430 °C", density: "5.43 g/cm³", magnetic: 0, magneticLabel: "No intrinsic field (0.00×)", magneticNote: "Mercury has no protective magnetic field and is fully exposed to solar flares." },
     Venus: { className: "Terrestrial planet", summary: "Cloud-covered greenhouse world", composition: "Silicate rock, iron core", atmosphere: "CO₂ 96.5%, nitrogen", temperature: "465 °C", density: "5.24 g/cm³", magnetic: 0, magneticLabel: "No intrinsic field", magneticNote: "The solar wind creates a weak induced magnetosphere." },
     Earth: { className: "Terrestrial planet", summary: "Temperate ocean world", composition: "Silicate rock, iron-nickel core", atmosphere: "Nitrogen 78%, oxygen 21%", temperature: "15 °C average", density: "5.51 g/cm³", magnetic: 1, magneticLabel: "1.00× Earth", magneticNote: "A strong global field shields the atmosphere and surface." },
     Mars: { className: "Terrestrial planet", summary: "Cold desert world", composition: "Basaltic rock, iron-rich soil", atmosphere: "CO₂ 95%, very thin", temperature: "−63 °C average", density: "3.93 g/cm³", magnetic: .002, magneticLabel: "Crustal remnants only", magneticNote: "Mars lost its global field; magnetism remains in its crust." },
@@ -328,7 +328,7 @@
 
   const planetData = [
     { name: "Sun", mass: 332946, radius: .19, radiusKm: 696340, color: "#ffb13b", texture: "sun", x: 0, phase: 0 },
-    { name: "Mercury", mass: .055, radius: .034, radiusKm: 2439.7, color: "#8d8982", texture: "mercury", x: .39, eccentricity: .2056, phase: .45 },
+    { name: "Mercury", mass: .055, radius: .034, radiusKm: 2439.7, color: "#8d8982", texture: "mercury", x: .39, eccentricity: .2056, phase: .45, magneticScale: 0 },
     { name: "Venus", mass: .815, radius: .05, radiusKm: 6051.8, color: "#e6a65c", texture: "venus", x: .72, eccentricity: .0068, phase: 2.2 },
     { name: "Earth", mass: 1, radius: .055, radiusKm: 6371, color: "#4f9cff", texture: "earth", x: 1, eccentricity: .0167, phase: 4.1 },
     { name: "Mars", mass: .107, radius: .043, radiusKm: 3389.5, color: "#a94f36", texture: "mars", x: 1.52, eccentricity: .0934, phase: 5.5 },
@@ -341,8 +341,8 @@
   const moonSystems = {
     Earth: [{ name: "Moon", mass: .0123, radiusKm: 1737.4, distance: .00257, eccentricity: .0549, phase: .4 }],
     Mars: [
-      { name: "Phobos", mass: 1.78e-9, radiusKm: 11.3, distance: .0000627, eccentricity: .0151, phase: 1.2 },
-      { name: "Deimos", mass: 2.48e-10, radiusKm: 6.2, distance: .0001568, phase: 4.4 },
+      { name: "Phobos", mass: 1.78e-9, radiusKm: 11.3, distance: .00048, eccentricity: .0151, phase: 1.2, isMoon: true, tidalImmune: true },
+      { name: "Deimos", mass: 2.48e-10, radiusKm: 6.2, distance: .00096, phase: 4.4, isMoon: true, tidalImmune: true },
     ],
     Jupiter: [
       { name: "Io", mass: .015, radiusKm: 1821.6, distance: .00282, eccentricity: .0041, phase: .2, color: "#e6c36f" },
@@ -1589,31 +1589,46 @@ return {
         const magnetosphereDist = (body.collisionRadius || 0.001) * (1.8 + Math.sqrt(magScale) * 3.8);
 
         if (dist <= magnetosphereDist) {
-          // Magnetic Shielding calculation: Strong field deflects, weak/no field absorbs heat & radiation
           const shielding = clamp(Math.sqrt(magScale) / 1.6, 0, 0.98);
           const unshieldedFraction = 1.0 - shielding;
 
           // Auroras triggered on shielded magnetosphere
           body.auroraExcitement = Math.min(1.0, (body.auroraExcitement || 0) + 0.35 + shielding * 0.45);
 
-          // Thermal Heating & Radium/Radiation absorption for unshielded fraction
-          if (unshieldedFraction > 0.02) {
-            body.temperatureKelvin = (body.temperatureKelvin || 288) + 24.0 * unshieldedFraction;
-            body.radiumDose = (body.radiumDose || 0.12) + 5.5 * unshieldedFraction;
-            
-            // Spawn impact thermal sparks
-            if (Math.random() < 0.4) {
-              const spd = 0.1 + Math.random() * 0.3;
+          // Thermal Heating, Scorching, and Radium absorption
+          if (unshieldedFraction > 0.05) {
+            body.temperatureKelvin = (body.temperatureKelvin || 288) + 32.0 * unshieldedFraction;
+            body.radiumDose = (body.radiumDose || 0.12) + 7.5 * unshieldedFraction;
+            body.scorchLevel = clamp((body.scorchLevel || 0) + 0.12 * unshieldedFraction, 0, 1.0);
+
+            // Dynamic Mercury Scorching transformation
+            if (body.name.includes("Mercury") || body.texture === "mercury") {
+              body.name = "Scorched Mercury";
+              body.color = "#c2713d"; // Orangey grayish scorched tint
+              if (body.science) {
+                body.science.summary = "Solar flare bombarded scorched world with burnt crust and extreme radiation.";
+                body.science.temperature = `${Math.round(body.temperatureKelvin - 273.15)} °C (Scorched)`;
+              }
+              if (!body.scorchNotified) {
+                body.scorchNotified = true;
+                toast("🔥 SOLAR FLARE STRIKE: CME particles bombarded Mercury's unshielded surface, creating Scorched Mercury!", 5000);
+              }
+            }
+
+            // Spawn impact molten thermal sparks & plasma filaments
+            for (let s = 0; s < 3; s++) {
+              const spd = 0.15 + Math.random() * 0.45;
+              const ang = Math.random() * Math.PI * 2;
               state.effects.push({
                 kind: "spark",
                 x: p.x,
                 y: p.y,
-                vx: (p.vx * 0.2) + (Math.random() - 0.5) * spd,
-                vy: (p.vy * 0.2) + (Math.random() - 0.5) * spd,
-                life: 0.8 + Math.random() * 0.8,
-                maxLife: 1.6,
-                size: 2.0 + Math.random() * 2.5,
-                color: body.temperatureKelvin > 1200 ? "#ff4500" : "#ffaa33"
+                vx: (p.vx * 0.15) + Math.cos(ang) * spd,
+                vy: (p.vy * 0.15) + Math.sin(ang) * spd,
+                life: 0.9 + Math.random() * 0.9,
+                maxLife: 1.8,
+                size: 2.2 + Math.random() * 3.0,
+                color: body.temperatureKelvin > 1000 ? "#ff4500" : (body.name.includes("Mercury") ? "#ea580c" : "#f59e0b")
               });
             }
           }
@@ -2247,13 +2262,15 @@ return {
     ctx.restore();
   }
 
-  function drawMagnetosphere(body, radius) {
+function drawMagnetosphere(body, radius) {
     const isSelected = state.selectedId === body.id || state.hoveredId === body.id;
     if (!isSelected) return;
     const strength = Math.max(0, body.magneticScale ?? 1);
-    if (strength <= 0.05) return;
-    const reach = radius * (1.6 + Math.sqrt(strength) * 1.8);
-    const opacity = isSelected ? clamp(0.25 + Math.log10(strength + 1) * 0.25, 0.2, 0.85) : clamp(0.08 + Math.log10(strength + 1) * 0.12, 0.08, 0.45);
+    if (strength <= 0.05) return; // Completely invisible for bodies with no magnetic field (like Mercury)
+
+    const time = performance.now() * 0.0025;
+    const reach = radius * (1.8 + Math.sqrt(strength) * 2.2);
+    const opacity = clamp(0.45 + Math.log10(strength + 1) * 0.35, 0.4, 0.95);
 
     // Find nearest star to orient the day-side bow shock and night-side magnetotail
     const star = state.bodies.find(b => (b.texture === "sun" || b.scienceType === "star") && b.id !== body.id) || state.bodies[0];
@@ -2265,41 +2282,64 @@ return {
     ctx.save();
     ctx.rotate(starAngle);
 
-    // 1. Day-side Compressed Bow Shock
-    ctx.strokeStyle = `rgba(56, 189, 248, ${opacity * 0.9})`;
-    ctx.lineWidth = isSelected ? 2.0 : 1.2;
+    // 1. Day-side Compressed Bow Shock Arc with shimmering cyan/white wave
+    const bowGrad = ctx.createLinearGradient(0, -reach * 0.8, 0, reach * 0.8);
+    bowGrad.addColorStop(0, "rgba(56, 189, 248, 0)");
+    bowGrad.addColorStop(0.3, `rgba(56, 189, 248, ${opacity * 0.85})`);
+    bowGrad.addColorStop(0.5, `rgba(255, 255, 255, ${opacity * 0.98})`);
+    bowGrad.addColorStop(0.7, `rgba(56, 189, 248, ${opacity * 0.85})`);
+    bowGrad.addColorStop(1, "rgba(56, 189, 248, 0)");
+
+    ctx.strokeStyle = bowGrad;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.arc(0, 0, reach * 0.75, -Math.PI * 0.45, Math.PI * 0.45);
+    ctx.arc(0, 0, reach * 0.78, -Math.PI * 0.46, Math.PI * 0.46);
     ctx.stroke();
 
-    // 2. Night-side Extended Magnetotail
-    ctx.strokeStyle = `rgba(99, 102, 241, ${opacity * 0.6})`;
+    // 2. Night-side Extended Streaming Magnetotail
+    ctx.strokeStyle = `rgba(168, 85, 247, ${opacity * 0.7})`;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(0, reach * 0.75);
-    ctx.quadraticCurveTo(-reach * 1.5, reach * 0.5, -reach * 2.4, reach * 0.2);
-    ctx.moveTo(0, -reach * 0.75);
-    ctx.quadraticCurveTo(-reach * 1.5, -reach * 0.5, -reach * 2.4, -reach * 0.2);
+    ctx.moveTo(0, reach * 0.78);
+    ctx.quadraticCurveTo(-reach * 1.6, reach * 0.55, -reach * 2.8, reach * 0.25);
+    ctx.moveTo(0, -reach * 0.78);
+    ctx.quadraticCurveTo(-reach * 1.6, -reach * 0.55, -reach * 2.8, -reach * 0.25);
     ctx.stroke();
 
-    // 3. Dipole Field Loops
+    // 3. Shimmering Multi-Color Dipole Aurora Field Loops
     ctx.save();
-    ctx.rotate(Math.PI * 0.5); // align with planetary poles
-    for (let index = 0; index < 3; index++) {
-      const loopScale = 0.55 + index * 0.22;
-      ctx.strokeStyle = `rgba(147, 197, 253, ${opacity * (0.8 - index * 0.18)})`;
-      ctx.lineWidth = Math.max(0.7, 1.4 - index * 0.2);
+    ctx.rotate(Math.PI * 0.5); // align loops along planetary magnetic poles
+    const numLoops = 4;
+    for (let index = 0; index < numLoops; index++) {
+      const loopScale = 0.52 + index * 0.22;
+      const wavePulse = Math.sin(time * 3 + index * 1.4) * 0.5 + 0.5;
+      
+      // Dynamic auroral color shifting: Emerald Green -> Violet -> Electric Cyan
+      const r = Math.round(74 + wavePulse * 90);
+      const g = Math.round(222 - wavePulse * 60);
+      const b = Math.round(128 + wavePulse * 120);
+      const loopColor = `rgba(${r}, ${g}, ${b}, ${opacity * (0.85 - index * 0.14)})`;
+
+      ctx.strokeStyle = loopColor;
+      ctx.lineWidth = Math.max(1.0, 2.0 - index * 0.3);
+      ctx.setLineDash([10, 8]);
+      ctx.lineDashOffset = -time * 35 * (index % 2 === 0 ? 1 : -1);
+
       ctx.beginPath();
-      ctx.ellipse(0, 0, reach * loopScale, reach * loopScale * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, reach * loopScale, reach * loopScale * 0.52, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
+    ctx.setLineDash([]);
     ctx.restore();
 
-    // 4. Volumetric Magnetopause Plasma Glow
-    const glow = ctx.createRadialGradient(0, 0, radius, 0, 0, reach);
-    glow.addColorStop(0, `rgba(56, 189, 248, ${opacity * 0.35})`);
-    glow.addColorStop(0.5, `rgba(99, 102, 241, ${opacity * 0.18})`);
-    glow.addColorStop(1, "rgba(37, 99, 235, 0)");
-    ctx.fillStyle = glow;
+    // 4. Glowing Polar Auroral Cusps & Magnetopause Radiance
+    const auraGrad = ctx.createRadialGradient(0, 0, radius, 0, 0, reach);
+    auraGrad.addColorStop(0, `rgba(74, 222, 128, ${opacity * 0.35})`);
+    auraGrad.addColorStop(0.45, `rgba(168, 85, 247, ${opacity * 0.22})`);
+    auraGrad.addColorStop(0.8, `rgba(56, 189, 248, ${opacity * 0.12})`);
+    auraGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+    ctx.fillStyle = auraGrad;
     ctx.beginPath();
     ctx.arc(0, 0, reach, 0, Math.PI * 2);
     ctx.fill();
@@ -2491,6 +2531,33 @@ return {
     const hasCustomWater = body.waterCoverage !== undefined && body.waterCoverage > 0 && body.texture !== "earth";
     if (hasCustomBands || hasCustomWater || !drawNasaTexture(body, radius)) {
       drawTexture(body, radius);
+    }
+
+    // Render Scorched Orangey-Grayish Crust Shader when bombarded by solar flares
+    if (body.scorchLevel && body.scorchLevel > 0) {
+      const scorchGrad = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, radius * 0.1, 0, 0, radius * 1.02);
+      scorchGrad.addColorStop(0, "rgba(251, 146, 60, 0.65)"); // orangey heat core
+      scorchGrad.addColorStop(0.4, "rgba(194, 65, 12, 0.72)");  // burnt orange-brown
+      scorchGrad.addColorStop(0.75, "rgba(75, 45, 30, 0.78)"); // dark scorched silicate crust
+      scorchGrad.addColorStop(1, "rgba(35, 25, 20, 0.85)");    // dark rim
+
+      ctx.fillStyle = scorchGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Scorched impact fractures and glowing thermal fissures
+      ctx.strokeStyle = "rgba(254, 215, 170, 0.45)";
+      ctx.lineWidth = Math.max(0.7, radius * 0.025);
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const ang = (body.id || 1) * 1.5 + k * 1.6;
+        const fx = Math.cos(ang) * radius * 0.55;
+        const fy = Math.sin(ang) * radius * 0.55;
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + Math.cos(ang + 0.8) * radius * 0.35, fy + Math.sin(ang + 0.8) * radius * 0.35);
+      }
+      ctx.stroke();
     }
 
     // Render dynamic Thermal Heating, Molten Magma, & Radium Glow on overheated planets
