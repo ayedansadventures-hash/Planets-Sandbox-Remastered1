@@ -99,7 +99,7 @@ input[type="color"] { width: 100%; height: 36px; padding: 3px; border: 1px solid
 .magnetic-field p { margin: 0; color: #65758d; font-size: 9px; line-height: 1.45; }
 
 .simulation-stage { position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: radial-gradient(circle at 60% 45%, #0b1628, #02050a 72%); }
-.simulation-stage::after { content: ""; position: absolute; z-index: 2; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(115,181,255,.018) 0 1px, transparent 1px 4px), radial-gradient(circle at 50% 45%, transparent 52%, rgba(0,3,10,.38) 100%); }
+.simulation-stage::after { content: ""; position: absolute; z-index: 2; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 45%, transparent 60%, rgba(0,3,10,.22) 100%); }
 #spaceCanvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #spaceCanvas.dragging { cursor: grabbing; }
 #spaceCanvas.adding { cursor: crosshair; }

@@ -1055,7 +1055,7 @@ return {
         const b = state.bodies[j];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const distSq = dx * dx + dy * dy + 1e-6;
+        const distSq = Math.max(dx * dx + dy * dy, 1e-18);
         const invDist = 1 / Math.sqrt(distSq);
         const pairScale = (a.gravityScale ?? 1) * (b.gravityScale ?? 1);
         const factor = G * pairScale * invDist * invDist * invDist;
@@ -1069,78 +1069,26 @@ return {
   }
 
 function integrate(dt) {
-    const acceleration = computeAccelerations();
-    
-    // 1. First leapfrog half-step for all primary bodies
-    for (let i = 0; i < state.bodies.length; i++) {
-      const body = state.bodies[i];
-      if (!body.isMoon) {
-        body.vx += acceleration[i].x * dt * 0.5;
-        body.vy += acceleration[i].y * dt * 0.5;
-        body.prevX = body.x;
-        body.prevY = body.y;
-        body.x += body.vx * dt;
-        body.y += body.vy * dt;
-      }
-    }
-
-    // 2. Hierarchical relative 2-body integration for natural satellites (moons)
-    for (let i = 0; i < state.bodies.length; i++) {
-      const body = state.bodies[i];
-      if (body.isMoon && body.parentId) {
-        const parent = state.bodies.find(b => b.id === body.parentId);
-        if (parent) {
-          body.prevX = body.x;
-          body.prevY = body.y;
-          
-          let relX = body.x - (parent.prevX ?? parent.x);
-          let relY = body.y - (parent.prevY ?? parent.y);
-          let relVx = body.vx - (parent.vx || 0);
-          let relVy = body.vy - (parent.vy || 0);
-          
-          const mu = G * (parent.gravityScale ?? 1) * (body.gravityScale ?? 1) * (parent.mass + body.mass);
-          const subSteps = 6;
-          const subDt = dt / subSteps;
-          
-          for (let s = 0; s < subSteps; s++) {
-            const rSq = relX * relX + relY * relY + 1e-12;
-            const invR3 = 1 / (Math.sqrt(rSq) * rSq);
-            const aX = -mu * relX * invR3;
-            const aY = -mu * relY * invR3;
-            
-            relVx += aX * subDt;
-            relVy += aY * subDt;
-            relX += relVx * subDt;
-            relY += relVy * subDt;
-          }
-          
-          body.x = parent.x + relX;
-          body.y = parent.y + relY;
-          body.vx = parent.vx + relVx;
-          body.vy = parent.vy + relVy;
-        } else {
-          // Fallback if parent missing
-          body.vx += acceleration[i].x * dt * 0.5;
-          body.vy += acceleration[i].y * dt * 0.5;
-          body.x += body.vx * dt;
-          body.y += body.vy * dt;
-        }
-      }
-    }
-
-    // 3. Second leapfrog half-step for primary non-moon bodies
-    const nextAcceleration = computeAccelerations();
-    for (let i = 0; i < state.bodies.length; i++) {
-      const body = state.bodies[i];
-      if (!body.isMoon) {
-        body.vx += nextAcceleration[i].x * dt * 0.5;
-        body.vy += nextAcceleration[i].y * dt * 0.5;
-      }
-    }
-
+    // All bodies share the same inertial frame and kick-drift-kick integrator.
+    // Satellites therefore respond to other planets and can escape naturally.
+    const first = computeAccelerations();
+    state.bodies.forEach((body, i) => {
+      body.prevX = body.x;
+      body.prevY = body.y;
+      body.vx += first[i].x * dt * .5;
+      body.vy += first[i].y * dt * .5;
+      body.x += body.vx * dt;
+      body.y += body.vy * dt;
+    });
+    const second = computeAccelerations();
+    state.bodies.forEach((body, i) => {
+      body.vx += second[i].x * dt * .5;
+      body.vy += second[i].y * dt * .5;
+    });
     resolveCollisions();
     resolveTidalDisruptions(dt);
   }
+
 
   function resolveCollisions() {
     for (let i = 0; i < state.bodies.length; i++) {
@@ -2139,14 +2087,15 @@ function openSolarFlareLauncher() {
     const encounterStep = closestEncounterStep();
     const closeScale = minStarDist < 0.6 ? Math.max(0.12, minStarDist / 0.6) : 1.0;
     const accuracyStep = Math.min(
-      .001 * DAY_TO_YEAR * closeScale,
+      .25 * DAY_TO_YEAR * closeScale,
       Number.isFinite(shortestPeriod) ? (shortestPeriod / 75) * closeScale : Infinity,
       Number.isFinite(encounterStep) ? encounterStep : Infinity,
     );
 
     const maxSteps = state.speedDays >= 300 ? 60 : state.speedDays >= 100 ? 45 : state.speedDays >= 30 ? 30 : 50;
     const steps = Math.min(maxSteps, Math.max(1, Math.ceil(requestedDt / accuracyStep)));
-    const dt = requestedDt / steps;
+    const dt = Math.min(requestedDt / steps, accuracyStep);
+    const advancedDt = dt * steps;
     const detailedTrails = state.trailLength > 0 && state.speedDays >= 50;
     const sampleEvery = Math.max(1, Math.floor(steps / 6));
 
@@ -2155,8 +2104,8 @@ function openSolarFlareLauncher() {
       if (detailedTrails && ((i + 1) % sampleEvery === 0 || i === steps - 1)) recordTrailSnapshot();
     }
 
-    state.simYears += requestedDt;
-    const achievedSpeed = requestedDt / DAY_TO_YEAR / Math.max(wallSeconds, .001);
+    state.simYears += advancedDt;
+    const achievedSpeed = advancedDt / DAY_TO_YEAR / Math.max(wallSeconds, .001);
     state.effectiveSpeedDays += (achievedSpeed - state.effectiveSpeedDays) * .25;
     
     state.relationshipTick += 1;
@@ -2181,9 +2130,9 @@ function openSolarFlareLauncher() {
   function drawBackground() {
     const { width, height } = state.viewport;
     const gradient = ctx.createRadialGradient(width * .58, height * .45, 0, width * .58, height * .45, Math.max(width, height) * .8);
-    gradient.addColorStop(0, "#0a1729");
-    gradient.addColorStop(.45, "#050c17");
-    gradient.addColorStop(1, "#010308");
+    gradient.addColorStop(0, "#05080d");
+    gradient.addColorStop(.45, "#020408");
+    gradient.addColorStop(1, "#000103");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
     const parallaxX = Math.sin(state.camera.x * .07) * width * .04;
@@ -2199,7 +2148,7 @@ function openSolarFlareLauncher() {
       const sourceX = travelX * (.5 + Math.sin(state.camera.x * .025) * .08);
       const sourceY = travelY * (.46 + Math.sin(state.camera.y * .025) * .06);
       ctx.save();
-      ctx.globalAlpha = .42;
+      ctx.globalAlpha = .18;
       ctx.drawImage(milkyWayPhoto, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
       ctx.restore();
       const photoShade = ctx.createRadialGradient(width * .55, height * .42, 0, width * .55, height * .42, Math.max(width, height) * .78);
@@ -2237,6 +2186,13 @@ function openSolarFlareLauncher() {
       ctx.beginPath();
       ctx.arc(x, y, star.radius, 0, Math.PI * 2);
       ctx.fill();
+      if (star.alpha > .55 && star.radius > .8) {
+        const bloom = ctx.createRadialGradient(x, y, 0, x, y, star.radius * 7);
+        bloom.addColorStop(0, star.blue ? "rgba(197,221,255,.28)" : "rgba(255,235,210,.24)");
+        bloom.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = bloom;
+        ctx.fillRect(x - star.radius * 7, y - star.radius * 7, star.radius * 14, star.radius * 14);
+      }
     }
   }
 
@@ -2872,12 +2828,13 @@ function drawMagnetosphere(body, radius) {
       ctx.fill();
     }
 
+    drawSunlight(body, radius);
     ctx.restore();
     drawAtmosphereAndAurora(body, radius);
     if (body.ring) drawRing(body, radius, false);
     // Crisp black limb silhouette outline
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
-    ctx.lineWidth = Math.max(0.8, radius * 0.035);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
+    ctx.lineWidth = Math.max(0.4, radius * 0.012);
     ctx.beginPath(); ctx.arc(0, 0, radius - 0.2, 0, Math.PI * 2); ctx.stroke();
     drawStarDiffractionSpikes(body, radius, p);
     if (state.selectedId === body.id) {
@@ -2890,6 +2847,23 @@ function drawMagnetosphere(body, radius) {
     ctx.restore();
 
     if (state.showVelocity) drawVelocity(body, p);
+  }
+
+  function drawSunlight(body, radius) {
+    if (body.texture === "sun" || body.scienceType === "star" || body.isLavaWorld) return;
+    const stars = state.bodies.filter(candidate => candidate.id !== body.id && (candidate.texture === "sun" || candidate.scienceType === "star"));
+    const star = stars.sort((a, b) => Math.hypot(a.x - body.x, a.y - body.y) - Math.hypot(b.x - body.x, b.y - body.y))[0];
+    if (!star) return;
+    const angle = Math.atan2(star.y - body.y, star.x - body.x);
+    const lx = Math.cos(angle) * radius;
+    const ly = Math.sin(angle) * radius;
+    const shade = ctx.createLinearGradient(lx, ly, -lx, -ly);
+    shade.addColorStop(0, "rgba(0,2,5,0)");
+    shade.addColorStop(.42, "rgba(0,2,5,.10)");
+    shade.addColorStop(.60, "rgba(0,2,5,.65)");
+    shade.addColorStop(1, "rgba(0,2,5,.94)");
+    ctx.fillStyle = shade;
+    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
   }
 
   function drawNasaTexture(body, radius) {
