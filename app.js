@@ -502,9 +502,9 @@ return {
 
   function isDebrisOrMoon(body) {
     if (!body) return false;
-    if (body.isMoon || body.parentId != null) return true;
+    if (body.isMoon) return true;
     const n = body.name || "";
-    return n.includes("Moon") || n.includes("Fragment") || n.includes("Core") ||
+    const isNamedMoonOrFragment = n.includes("Moon") || n.includes("Fragment") || n.includes("Core") ||
       n.includes("Deimos") || n.includes("Phobos") || n.includes("Io") ||
       n.includes("Europa") || n.includes("Ganymede") || n.includes("Callisto") ||
       n.includes("Titan") || n.includes("Enceladus") || n.includes("Mimas") ||
@@ -512,6 +512,15 @@ return {
       n.includes("Iapetus") || n.includes("Miranda") || n.includes("Ariel") ||
       n.includes("Umbriel") || n.includes("Titania") || n.includes("Oberon") ||
       n.includes("Triton") || n.includes("Charon");
+    if (isNamedMoonOrFragment) return true;
+    // Check if it orbits a non-star planet and has small mass (true moon/satellite)
+    if (body.parentId != null) {
+      const parent = state.bodies.find(b => b.id === body.parentId);
+      if (parent && parent.texture !== "sun" && parent.scienceType !== "star" && !parent.isBlackHole) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function recenterSubsystem(bodies, anchor) {
@@ -3771,193 +3780,279 @@ const hasCustomBands = body.bandCount && body.bandCount > 0;
     }
   }
 
-function drawLaunchPreview() {
-    if (state.addMode && state.launchMode === "autoOrbit") {
+  function computeLifeLikelihood(primary, worldX, worldY, spec) {
+    if (!primary) {
+      return {
+        score: 0,
+        zone: "Deep Space",
+        tempC: -270,
+        tempK: 3,
+        verdict: "Freezing vacuum of interstellar space. No stellar energy for biological metabolism."
+      };
+    }
+
+    const dist = Math.max(0.001, Math.hypot(worldX - primary.x, worldY - primary.y));
+    const hz = getHabitableZone(primary, spec);
+    const roche = rocheLimit(primary, (spec?.mass || 1) / EARTHS_PER_SUN, spec?.collisionRadius || EARTH_RADIUS_AU);
+    const lum = hz ? hz.luminosity : (primary.mass || 1);
+
+    // Planetary temperature accounting for greenhouse effect
+    let ghAdd = 0;
+    const gasType = spec?.gasType || "earthAir";
+    const pressure = spec?.atmoPressure ?? 1.0;
+    if (gasType === "carbonDioxide") ghAdd = Math.min(480, 70 + pressure * 14);
+    else if (gasType === "methane") ghAdd = Math.min(120, 25 + pressure * 8);
+    else if (gasType === "ammonia") ghAdd = Math.min(140, 30 + pressure * 9);
+    else if (gasType === "earthAir") ghAdd = 33 * Math.min(3, Math.pow(Math.max(0.05, pressure), 0.35));
+    else if (gasType === "customMix") {
+      const co2 = spec?.gasMix?.co2 ?? 1;
+      const ch4 = spec?.gasMix?.ch4 ?? 0;
+      ghAdd = (co2 * 2.2 + ch4 * 1.5) * Math.min(3, Math.pow(Math.max(0.05, pressure), 0.35));
+    } else if (gasType === "none") ghAdd = 0;
+
+    const baseTempK = 278 * Math.pow(lum, 0.25) / Math.sqrt(Math.max(dist, 0.005));
+    const tempK = Math.round(baseTempK + ghAdd);
+    const tempC = tempK - 273;
+
+    // Check zones
+    let zone = "Habitable Zone";
+    let score = 0;
+    let verdict = "";
+
+    if (dist <= roche) {
+      zone = "Tidal Shredding Zone";
+      score = 0;
+      verdict = "💥 Crushed by tidal shear forces inside the Roche limit. Planet will be shattered into dust.";
+    } else if (hz && dist < hz.innerAU) {
+      zone = "Scorch Zone";
+      if (tempK > 450) {
+        score = 0;
+        verdict = `☀️ Scorching molten inferno (${tempC}°C). Surface rock is melted into incandescent lava; oceans boiled away.`;
+      } else {
+        score = Math.max(2, Math.round(18 * (1 - (tempC - 45) / 130)));
+        verdict = `☀️ Extreme hyperthermal heat (${tempC}°C). Runaway greenhouse makes surface hostile to liquid water.`;
+      }
+    } else if (hz && dist > hz.outerAU) {
+      zone = "Cold Zone";
+      if (tempK < 200) {
+        score = 0;
+        verdict = `❄️ Cryogenic deep freeze (${tempC}°C). Volatiles freeze into solid glaciers; biological chemistry is locked in ice.`;
+      } else {
+        score = Math.max(5, Math.round(35 * ((tempK - 180) / 93)));
+        verdict = `❄️ Snowball world (${tempC}°C). Thick global ice sheets. Subsurface hydrothermal microbial life may exist.`;
+      }
+    } else {
+      // In Habitable Zone!
+      zone = "Habitable Zone";
+      let baseScore = 65;
+
+      // Temperature rating (0°C to 35°C is ideal)
+      if (tempC >= 0 && tempC <= 35) baseScore += 20;
+      else if (tempC > 35 && tempC <= 55) baseScore += 8;
+      else if (tempC >= -20 && tempC < 0) baseScore += 8;
+
+      // Water coverage rating
+      const water = spec?.waterCoverage ?? 71;
+      if (water >= 30 && water <= 85) baseScore += 10;
+      else if (water > 0 && water < 30) baseScore += 3;
+      else if (water > 85) baseScore += 6; // ocean world
+      else baseScore -= 30; // completely dry desert
+
+      // Atmosphere mix rating
+      if (gasType === "earthAir" && pressure >= 0.4 && pressure <= 2.5) {
+        baseScore += 10;
+        verdict = `🌿 Prime Biosphere: Ideal temperate oceans (${tempC}°C) and oxygenated atmosphere. Complex multicellular ecosystems can thrive!`;
+      } else if (gasType === "carbonDioxide" && water > 10) {
+        baseScore = Math.min(baseScore, 58);
+        verdict = `🌱 Primitive Archaea: Liquid water with CO₂ atmosphere (${tempC}°C). Supports robust anaerobic & photosynthetic microbes.`;
+      } else if (gasType === "methane" && water > 10) {
+        baseScore = Math.min(baseScore, 48);
+        verdict = `🦠 Exotic Extremophiles: Methane-rich skies with temperate ground (${tempC}°C). Exotic hydrocarbon or methanogenic microbes likely.`;
+      } else if (gasType === "none") {
+        baseScore = 5;
+        verdict = `⚠️ Airless Vacuum: In habitable orbit, but lacks protective atmosphere. Cosmic radiation sterilizes surface.`;
+      } else {
+        verdict = `🌿 Moderate Potential (${tempC}°C): Liquid oceans stable, capable of supporting extremophilic or marine organisms.`;
+      }
+
+      score = clamp(Math.round(baseScore), 0, 99);
+      if (spec?.type === "planet" && dist >= 0.95 && dist <= 1.15) score = 98;
+    }
+
+    // Stellar toxicity penalties
+    if (primary.isBlackHole || primary.texture === "blackHole") {
+      score = Math.min(score, 12);
+      verdict = `⚠️ Relativistic Radiation: Orbiting a black hole. High accretion disk X-rays severely degrade habitability.`;
+    }
+
+    return { score, zone, tempC, tempK, verdict };
+  }
+
+  function drawLaunchPreview() {
+    const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && ui.launchPanel.classList.contains("open"));
+    if (!state.addMode && !isLauncherOpen && !state.orbitPlacement) return;
+
+    if (state.launchMode === "orbit" || state.launchMode === "autoOrbit" || isLauncherOpen) {
       const mouseWorld = screenToWorld(state.pointer.x, state.pointer.y);
       const { spec } = currentSpawnSpec();
-      const primary = findDominantGravityParent(mouseWorld.x, mouseWorld.y, spec.mass);
+      
+      // Determine primary star to orbit around
+      let primary = null;
+      if (state.selectedId) primary = state.bodies.find(b => b.id === state.selectedId);
+      if (!primary) primary = findDominantGravityParent(mouseWorld.x, mouseWorld.y, spec.mass);
+
       const mouseScreen = { x: state.pointer.x, y: state.pointer.y };
-      ctx.save();
+      const eccentricity = clamp(Number(ui.eccentricity?.value || 0) / 100, 0, 0.85);
+      const prograde = ui.orbitDirection ? ui.orbitDirection.value !== "retrograde" : true;
 
+      // Update Life Likelihood Guesser in the launcher panel
       if (primary) {
-        const primaryScreen = worldToScreen(primary.x, primary.y);
-        const dist = Math.hypot(mouseWorld.x - primary.x, mouseWorld.y - primary.y);
-        const hz = getHabitableZone(primary);
-        const roche = rocheLimit(primary, spec.mass / EARTHS_PER_SUN, spec.collisionRadius);
-        const lum = hz ? hz.luminosity : (primary.mass || 1);
-        const tempK = Math.round(278 * Math.pow(lum, 0.25) / Math.sqrt(Math.max(dist, 0.005)));
-        const tempC = tempK - 273;
+        const lifeAnalysis = computeLifeLikelihood(primary, mouseWorld.x, mouseWorld.y, spec);
+        const lifeScoreEl = document.getElementById("launcherLifeScore");
+        const lifeBarEl = document.getElementById("launcherLifeBar");
+        const lifeZoneEl = document.getElementById("launcherLifeZone");
+        const lifeTempEl = document.getElementById("launcherLifeTemp");
+        const lifeVerdictEl = document.getElementById("launcherLifeVerdict");
+        const orbitDistEl = document.getElementById("orbitDistanceValue");
 
-        // Dynamic State Analysis
-        let previewColor = "#38bdf8";
-        let stateTitle = "Orbiting";
-        let stateSub = "";
-        let isRocheBreach = dist <= roche;
-        let isHabitable = hz && dist >= hz.innerAU && dist <= hz.outerAU;
-        let isTorrid = hz && dist < hz.innerAU && !isRocheBreach;
+        if (lifeScoreEl) {
+          lifeScoreEl.textContent = `${lifeAnalysis.score}%`;
+          lifeScoreEl.style.color = lifeAnalysis.score > 70 ? "#34d399" : lifeAnalysis.score > 35 ? "#fbbf24" : "#f87171";
+        }
+        if (lifeBarEl) {
+          lifeBarEl.style.width = `${lifeAnalysis.score}%`;
+        }
+        if (lifeZoneEl) lifeZoneEl.textContent = lifeAnalysis.zone;
+        if (lifeTempEl) lifeTempEl.textContent = `${lifeAnalysis.tempC}°C`;
+        if (lifeVerdictEl) lifeVerdictEl.textContent = lifeAnalysis.verdict;
 
-        if (isRocheBreach) {
-          previewColor = "#ef4444";
-          stateTitle = "💥 ROCHE LIMIT: TIDAL SHREDDING ZONE";
-          stateSub = `Planet will be violently ripped apart by tidal gravity!`;
-        } else if (isTorrid) {
-          const heatRatio = clamp((hz.innerAU - dist) / Math.max(0.01, hz.innerAU - roche), 0, 1);
-          previewColor = heatRatio > 0.6 ? "#dc2626" : "#f97316";
-          stateTitle = `☀️ TORRID SCORCHED (${tempC}°C / ${tempK}K)`;
-          stateSub = `Atmosphere boils away into superheated magma!`;
-        } else if (isHabitable) {
-          previewColor = "#10b981";
-          stateTitle = `🌿 HABITABLE ZONE: LIFE SUSTAINING (${tempC}°C)`;
-          stateSub = `Ideal temperate climate for liquid oceans and life!`;
-        } else {
-          previewColor = "#93c5fd";
-          stateTitle = `❄️ FROZEN GLACIATED (${tempC}°C)`;
-          stateSub = `Beyond habitable boundary, locked in ice.`;
+        const dist = Math.max(1e-4, Math.hypot(mouseWorld.x - primary.x, mouseWorld.y - primary.y));
+        if (orbitDistEl) {
+          const semiMajor = dist / Math.max(0.05, 1 - eccentricity);
+          const periodYears = Math.sqrt(Math.pow(semiMajor, 3) / Math.max(0.01, primary.mass));
+          const periodStr = periodYears >= 1 ? `${periodYears.toFixed(2)} yrs` : `${Math.round(periodYears * 365.25)} days`;
+          orbitDistEl.textContent = `${formatDistance(dist)} · Period ${periodStr}`;
         }
 
-        // Orbit preview track
-        ctx.strokeStyle = isRocheBreach ? "rgba(239, 68, 68, 0.85)" : isHabitable ? "rgba(52, 211, 153, 0.85)" : isTorrid ? "rgba(245, 158, 11, 0.75)" : "rgba(102, 198, 255, 0.75)";
-        ctx.setLineDash(isRocheBreach ? [3, 3] : [6, 6]);
-        ctx.lineWidth = isRocheBreach ? 2.0 : 1.5;
+        ctx.save();
+        const primaryScreen = worldToScreen(primary.x, primary.y);
+        const angle = Math.atan2(mouseWorld.y - primary.y, mouseWorld.x - primary.x);
+        const periDist = dist;
+        const semiMajor = periDist / Math.max(0.05, 1 - eccentricity);
+        const semiMinor = semiMajor * Math.sqrt(1 - eccentricity * eccentricity);
+        
+        // Center of ellipse: focus (star) is at primary, center is shifted along opposite direction by a*e
+        const centerWorldX = primary.x - Math.cos(angle) * semiMajor * eccentricity;
+        const centerWorldY = primary.y - Math.sin(angle) * semiMajor * eccentricity;
+        const centerScreen = worldToScreen(centerWorldX, centerWorldY);
+
+        // Orbit track styling based on zone
+        const isRoche = dist <= rocheLimit(primary, spec.mass / EARTHS_PER_SUN, spec.collisionRadius);
+        const hz = getHabitableZone(primary, spec);
+        const isHab = hz && dist >= hz.innerAU && dist <= hz.outerAU;
+        const isTorrid = hz && dist < hz.innerAU && !isRoche;
+
+        ctx.strokeStyle = isRoche ? "rgba(239, 68, 68, 0.9)" : isHab ? "rgba(52, 211, 153, 0.9)" : isTorrid ? "rgba(245, 158, 11, 0.8)" : "rgba(102, 198, 255, 0.8)";
+        ctx.lineWidth = isRoche ? 2.2 : 1.8;
+        ctx.setLineDash(isRoche ? [4, 4] : [6, 5]);
+
         ctx.beginPath();
-        ctx.arc(primaryScreen.x, primaryScreen.y, dist * state.camera.zoom, 0, Math.PI * 2);
+        ctx.ellipse(centerScreen.x, centerScreen.y, semiMajor * state.camera.zoom, semiMinor * state.camera.zoom, angle, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Connecting ray
-        ctx.strokeStyle = rgbaColor(previewColor, 0.45);
+        // Connecting ray from star to mouse
+        ctx.setLineDash([2, 4]);
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
         ctx.beginPath();
         ctx.moveTo(primaryScreen.x, primaryScreen.y);
         ctx.lineTo(mouseScreen.x, mouseScreen.y);
         ctx.stroke();
 
-        // Planet preview body
-        const planetR = Math.max(7, spec.radius * state.camera.zoom * 0.5);
+        // Periapsis & Apoapsis markers if eccentricity > 0.05
+        if (eccentricity > 0.05) {
+          ctx.setLineDash([]);
+          // Apoapsis
+          const apoDist = semiMajor * (1 + eccentricity);
+          const apoScreen = worldToScreen(primary.x - Math.cos(angle) * apoDist, primary.y - Math.sin(angle) * apoDist);
+          ctx.fillStyle = "rgba(147, 197, 253, 0.8)";
+          ctx.beginPath();
+          ctx.arc(apoScreen.x, apoScreen.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.font = "600 9px Inter, sans-serif";
+          ctx.fillText(`Apoapsis ${formatDistance(apoDist)}`, apoScreen.x + 8, apoScreen.y - 4);
+        }
+
+        // Ghost Preview of Planet / Object
         ctx.save();
         ctx.translate(mouseScreen.x, mouseScreen.y);
+        const previewR = Math.max(8, spec.radius * state.camera.zoom * 0.5);
 
-        if (isRocheBreach) {
-          // Elongate prolate spheroid along radial axis
-          const radAngle = Math.atan2(mouseWorld.y - primary.y, mouseWorld.x - primary.x);
-          ctx.rotate(radAngle);
-          ctx.scale(1.45, 0.7);
+        // Rings if enabled
+        const ringsCheckbox = document.getElementById("spawnRings");
+        const hasRings = (spec.ring || (ringsCheckbox && ringsCheckbox.checked)) && (spec.scienceType === "gasGiant" || spec.scienceType === "planet" || spec.type === "customPlanet");
+        if (hasRings) {
+          ctx.save();
+          ctx.rotate(-Math.PI / 6);
+          ctx.scale(1.0, 0.35);
+          ctx.strokeStyle = "rgba(215, 189, 125, 0.65)";
+          ctx.lineWidth = previewR * 0.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, previewR * 1.9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
 
-          // White-hot core with crimson halo
-          const shredGrad = ctx.createRadialGradient(0, 0, planetR * 0.2, 0, 0, planetR * 1.5);
-          shredGrad.addColorStop(0, "#ffffff");
-          shredGrad.addColorStop(0.3, "#fde047");
-          shredGrad.addColorStop(0.7, "#ef4444");
-          shredGrad.addColorStop(1, "rgba(239, 68, 68, 0)");
-          ctx.fillStyle = shredGrad;
-          ctx.beginPath();
-          ctx.arc(0, 0, planetR * 1.5, 0, Math.PI * 2);
-          ctx.fill();
+        // Planet body
+        ctx.fillStyle = spec.color || "#4d9fe8";
+        ctx.beginPath();
+        ctx.arc(0, 0, previewR, 0, Math.PI * 2);
+        ctx.fill();
 
-          ctx.fillStyle = "#ef4444";
+        // Atmosphere glow
+        if (spec.customAtmosphere || spec.texture === "earth" || spec.texture === "proceduralGas") {
+          const haloGrad = ctx.createRadialGradient(0, 0, previewR * 0.7, 0, 0, previewR * 1.6);
+          haloGrad.addColorStop(0, spec.atmoColor || "rgba(96, 165, 250, 0.6)");
+          haloGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = haloGrad;
           ctx.beginPath();
-          ctx.arc(0, 0, planetR, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          // Normal / Heated planet preview
-          const glowGrad = ctx.createRadialGradient(0, 0, planetR * 0.4, 0, 0, planetR * 1.8);
-          glowGrad.addColorStop(0, previewColor);
-          glowGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-          ctx.fillStyle = glowGrad;
-          ctx.beginPath();
-          ctx.arc(0, 0, planetR * 1.8, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = previewColor;
-          ctx.beginPath();
-          ctx.arc(0, 0, planetR, 0, Math.PI * 2);
+          ctx.arc(0, 0, previewR * 1.6, 0, Math.PI * 2);
           ctx.fill();
         }
+
         ctx.restore();
 
-        // Multi-line HUD Tooltip Badge
+        // Tooltip HUD badge following mouse
         ctx.save();
         ctx.font = "700 11px Inter, sans-serif";
-        ctx.fillStyle = previewColor;
+        ctx.fillStyle = lifeAnalysis.score > 70 ? "#34d399" : lifeAnalysis.score > 35 ? "#fbbf24" : "#f87171";
         ctx.textAlign = "left";
-        ctx.fillText(stateTitle, mouseScreen.x + 16, mouseScreen.y - 12);
+        ctx.fillText(`${spec.label || "Object"} · Life Potential: ${lifeAnalysis.score}%`, mouseScreen.x + 16, mouseScreen.y - 12);
 
         ctx.font = "500 10px Inter, sans-serif";
         ctx.fillStyle = "rgba(226, 232, 240, 0.95)";
-        ctx.fillText(`Orbiting ${primary.name} at ${formatDistance(dist)}`, mouseScreen.x + 16, mouseScreen.y + 2);
+        const dirText = prograde ? "Prograde" : "Retrograde";
+        ctx.fillText(`Orbiting ${primary.name} at ${formatDistance(dist)} (${dirText})`, mouseScreen.x + 16, mouseScreen.y + 2);
 
         ctx.font = "500 9px Inter, sans-serif";
         ctx.fillStyle = "rgba(148, 163, 184, 0.9)";
-        ctx.fillText(stateSub, mouseScreen.x + 16, mouseScreen.y + 15);
+        ctx.fillText(`Click anywhere to spawn immediately!`, mouseScreen.x + 16, mouseScreen.y + 16);
         ctx.restore();
 
-      } else {
-        ctx.fillStyle = "#38bdf8";
-        ctx.beginPath();
-        ctx.arc(mouseScreen.x, mouseScreen.y, Math.max(6, spec.radius * state.camera.zoom * 0.5), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.font = "600 11px Inter, sans-serif";
-        ctx.fillStyle = "rgba(194, 225, 255, 0.95)";
-        ctx.textAlign = "left";
-        ctx.fillText("Spawn object in deep space", mouseScreen.x + 14, mouseScreen.y - 8);
+        ctx.restore();
+        return;
       }
-      ctx.restore();
-      return;
     }
-    if (state.orbitPlacement) {
-      const target = state.bodies.find((body) => body.id === state.launchTargetId);
-      if (!target) return;
-      const eccentricity = Number(ui.eccentricity.value) / 100;
-      const semiMajor = state.orbitDistance / Math.max(.05, 1 - eccentricity);
-      const semiMinor = semiMajor * Math.sqrt(1 - eccentricity * eccentricity);
-      const center = worldToScreen(
-        target.x - Math.cos(state.orbitAngle) * semiMajor * eccentricity,
-        target.y - Math.sin(state.orbitAngle) * semiMajor * eccentricity,
-      );
-      const start = worldToScreen(
-        target.x + Math.cos(state.orbitAngle) * state.orbitDistance,
-        target.y + Math.sin(state.orbitAngle) * state.orbitDistance,
-      );
-      const targetScreen = worldToScreen(target.x, target.y);
-      const { spec } = currentSpawnSpec();
-      const limits = orbitLimits(target, spec, eccentricity);
-      ctx.save();
-      ctx.strokeStyle = "rgba(92,220,183,.18)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 7]);
-      ctx.beginPath(); ctx.arc(targetScreen.x, targetScreen.y, limits.stableRadius * state.camera.zoom, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = "rgba(255,102,111,.45)";
-      ctx.setLineDash([2, 4]);
-      ctx.beginPath(); ctx.arc(targetScreen.x, targetScreen.y, limits.roche * state.camera.zoom, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = "rgba(102,198,255,.9)";
-      ctx.fillStyle = "#8fd4ff";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([7, 5]);
-      ctx.beginPath();
-      ctx.ellipse(center.x, center.y, semiMajor * state.camera.zoom, semiMinor * state.camera.zoom, state.orbitAngle, 0, Math.PI * 2);
-      ctx.stroke();
+
+    if (state.launchMode === "impact" && state.launchStart && state.pointer.dragging) {
+      const start = worldToScreen(state.launchStart.x, state.launchStart.y);
+      ctx.strokeStyle = "#8bc1ff";
+      ctx.fillStyle = "#8bc1ff";
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.arc(start.x, start.y, 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(state.pointer.x, state.pointer.y); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.strokeStyle = "rgba(132,191,255,.35)";
-      ctx.beginPath(); ctx.moveTo(targetScreen.x, targetScreen.y); ctx.lineTo(start.x, start.y); ctx.stroke();
-      ctx.beginPath(); ctx.arc(start.x, start.y, 7, 0, Math.PI * 2); ctx.fill();
-      ctx.font = "600 10px Inter, sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(194,225,255,.9)";
-      ctx.fillText(`Periapsis ${formatDistance(state.orbitDistance)}`, start.x + 12, start.y - 8);
-      const apoapsis = semiMajor * (1 + eccentricity);
-      const far = worldToScreen(target.x - Math.cos(state.orbitAngle) * apoapsis, target.y - Math.sin(state.orbitAngle) * apoapsis);
-      ctx.textAlign = "right";
-      ctx.fillText(`Apoapsis ${formatDistance(apoapsis)}`, far.x - 10, far.y - 8);
-      ctx.restore();
-      return;
+      ctx.beginPath(); ctx.arc(state.pointer.x, state.pointer.y, 3, 0, Math.PI * 2); ctx.fill();
     }
-    if (!state.addMode || !state.launchStart || !state.pointer.dragging) return;
-    const start = worldToScreen(state.launchStart.x, state.launchStart.y);
-    ctx.strokeStyle = "#8bc1ff";
-    ctx.fillStyle = "#8bc1ff";
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath(); ctx.arc(start.x, start.y, 7, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(state.pointer.x, state.pointer.y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(state.pointer.x, state.pointer.y, 3, 0, Math.PI * 2); ctx.fill();
   }
 
   function drawMoveGuide() {
@@ -4221,6 +4316,24 @@ const point = bodyDisplayPoint(body);
     ui.bodyMagneticNote.textContent = `${science.magneticNote} Hover over the body to reveal its magnetosphere.`;
     ui.bodyMagneticMeter.style.width = `${clamp(body.magneticScale ?? 1, 0, 100)}%`;
     ui.planetPreview.style.setProperty("--planet-color", body.color);
+
+    if (ui.bodyHabitability) {
+      if (body.texture === "sun" || body.scienceType === "star" || body.isBlackHole) {
+        ui.bodyHabitability.textContent = "0% (Extreme Stellar Environment)";
+      } else {
+        const star = state.bodies.find(b => (b.texture === "sun" || b.scienceType === "star") && b.id !== body.id) || null;
+        const analysis = computeLifeLikelihood(star, body.x, body.y, {
+          mass: body.mass * EARTHS_PER_SUN,
+          collisionRadius: body.collisionRadius,
+          gasType: body.gasType || (body.name === "Earth" ? "earthAir" : body.name === "Venus" ? "carbonDioxide" : "none"),
+          atmoPressure: body.atmoPressure ?? (body.name === "Earth" ? 1.0 : body.name === "Venus" ? 92.0 : 0.01),
+          waterCoverage: body.waterCoverage ?? (body.name === "Earth" ? 71 : 0),
+          gasMix: body.gasMix,
+          magneticScale: body.magneticScale ?? 1.0,
+        });
+        ui.bodyHabitability.textContent = `${analysis.score}% (${analysis.zone})`;
+      }
+    }
   }
 
   function updateHUD() {
@@ -4292,9 +4405,15 @@ const point = bodyDisplayPoint(body);
     toast(`Camera now following ${body.name}`);
   }
 
-function currentSpawnSpec() {
+  function currentSpawnSpec() {
     const type = document.querySelector('input[name="spawnType"]:checked')?.value || "asteroid";
-    let spec = type === "star" ? { ...spawnCatalog.star, ...starCatalog[ui.starType.value] } : { ...spawnCatalog[type] };
+    let spec = type === "star" ? { ...spawnCatalog.star, ...starCatalog[ui.starType?.value || "gStar"] } : { ...spawnCatalog[type] };
+
+    // Apply rings toggle for gas giant and custom planet
+    const ringsCheckbox = document.getElementById("spawnRings");
+    if (ringsCheckbox && (type === "gasGiant" || type === "customPlanet")) {
+      spec.ring = ringsCheckbox.checked;
+    }
 
     // Apply dynamic custom planet studio settings
     if (type === "customPlanet") {
@@ -4313,6 +4432,15 @@ function currentSpawnSpec() {
       spec.oceanColor = oceanColorInput ? oceanColorInput.value : "#1d4ed8";
       spec.landColor = landColorInput ? landColorInput.value : "#15803d";
       spec.customAtmosphere = spec.gasType !== "none";
+
+      if (spec.gasType === "customMix") {
+        const n2 = parseFloat(document.getElementById("customGasN2")?.value || "78");
+        const o2 = parseFloat(document.getElementById("customGasO2")?.value || "21");
+        const co2 = parseFloat(document.getElementById("customGasCO2")?.value || "1");
+        const ch4 = parseFloat(document.getElementById("customGasCH4")?.value || "0");
+        spec.gasMix = { n2, o2, co2, ch4 };
+        spec.atmosphereComposition = `N₂ ${n2}%, O₂ ${o2}%, CO₂ ${co2}%, CH₄ ${ch4}%`;
+      }
     }
 
     const target = state.bodies.find((body) => body.id === state.launchTargetId);
@@ -4424,9 +4552,19 @@ function getHabitableZone(star, planetSpec = null) {
       const pressureVal = document.getElementById("launchCustomPressure")?.value;
       const pressure = planetSpec?.atmoPressure ?? (pressureVal ? parseFloat(pressureVal) : 1.0);
       
-      const gasMultiplier = gas === "carbonDioxide" ? 2.4 : gas === "methane" ? 1.8 : gas === "ammonia" ? 1.9 : gas === "none" ? 0.65 : 1.0;
+      let gasMultiplier = 1.0;
+      if (gas === "carbonDioxide") gasMultiplier = 2.4;
+      else if (gas === "methane") gasMultiplier = 1.8;
+      else if (gas === "ammonia") gasMultiplier = 1.9;
+      else if (gas === "hydrogenHelium") gasMultiplier = 1.2;
+      else if (gas === "none") gasMultiplier = 0.65;
+      else if (gas === "customMix") {
+        const co2 = planetSpec?.gasMix?.co2 ?? parseFloat(document.getElementById("customGasCO2")?.value || "1");
+        const ch4 = planetSpec?.gasMix?.ch4 ?? parseFloat(document.getElementById("customGasCH4")?.value || "0");
+        gasMultiplier = clamp(0.75 + (co2 * 0.018) + (ch4 * 0.014), 0.65, 3.2);
+      }
       const pressureMultiplier = Math.pow(Math.max(0.01, pressure), 0.22);
-      greenhouseFactor = clamp(gasMultiplier * pressureMultiplier, 0.55, 3.2);
+      greenhouseFactor = clamp(gasMultiplier * pressureMultiplier, 0.55, 3.5);
     }
 
     const baseInner = 0.95 * sqrtL;
@@ -4486,7 +4624,7 @@ function getHabitableZone(star, planetSpec = null) {
     return bestPrimary;
   }
 
-  function computeAutoOrbitVelocity(worldX, worldY, primary, newMassEarths = 1, prograde = true) {
+  function computeAutoOrbitVelocity(worldX, worldY, primary, newMassEarths = 1, prograde = true, eccentricity = 0) {
     if (!primary) return { vx: 0, vy: 0, distance: 0, speed: 0 };
     const dx = worldX - primary.x;
     const dy = worldY - primary.y;
@@ -4495,13 +4633,15 @@ function getHabitableZone(star, planetSpec = null) {
 
     const orbiterMass = Math.max(1e-12, newMassEarths) / EARTHS_PER_SUN;
     const effectivePairMass = (primary.gravityScale ?? 1) * (primary.mass + orbiterMass);
-    const speed = Math.sqrt(G * effectivePairMass / distance);
+    const e = clamp(eccentricity, 0, 0.85);
+    // Keplerian speed at periapsis: v_p = sqrt(G * M_eff * (1 + e) / r_p)
+    const speed = Math.sqrt(G * effectivePairMass * (1 + e) / distance);
 
     const dir = prograde ? 1 : -1;
     const vx = primary.vx - (dy / distance) * speed * dir;
     const vy = primary.vy + (dx / distance) * speed * dir;
 
-    return { vx, vy, distance, speed };
+    return { vx, vy, distance, speed, eccentricity: e };
   }
 
   function spawnAutoOrbitPlanet(worldX, worldY) {
@@ -4509,9 +4649,14 @@ function getHabitableZone(star, planetSpec = null) {
       toast(`Maximum of ${MAX_BODIES} bodies reached`);
       return;
     }
-    const { spec } = currentSpawnSpec();
-    const primary = findDominantGravityParent(worldX, worldY, spec.mass);
+    const { type, spec } = currentSpawnSpec();
+    const eccentricity = clamp(Number(ui.eccentricity?.value || 0) / 100, 0, 0.85);
     const prograde = ui.orbitDirection ? ui.orbitDirection.value !== "retrograde" : true;
+    
+    // Choose host star or primary to orbit
+    let primary = null;
+    if (state.selectedId) primary = state.bodies.find(b => b.id === state.selectedId);
+    if (!primary) primary = findDominantGravityParent(worldX, worldY, spec.mass);
     
     let spawnX = worldX;
     let spawnY = worldY;
@@ -4525,8 +4670,8 @@ function getHabitableZone(star, planetSpec = null) {
       }
     }
 
-    const { vx, vy } = computeAutoOrbitVelocity(spawnX, spawnY, primary, spec.mass, prograde);
-    const isMoon = primary ? (primary.texture !== "sun" && !primary.parentId) : false;
+    const { vx, vy } = computeAutoOrbitVelocity(spawnX, spawnY, primary, spec.mass, prograde, eccentricity);
+    const isMoon = primary ? (primary.texture !== "sun" && primary.scienceType !== "star" && !primary.isBlackHole) : false;
     
     const newBody = makeBody({
       ...spec,
@@ -4545,43 +4690,38 @@ function getHabitableZone(star, planetSpec = null) {
     state.effects.push({ kind: "shockwave", x: spawnX, y: spawnY, life: 1.5, maxLife: 1.5, radius: 6, growth: 55, color: newBody.color });
     SoundEngine.playOrbitPlacement();
     selectBody(newBody);
-    renderSystemRoster();
+    if (typeof renderSystemRoster === "function") renderSystemRoster();
     updateHUD();
     toast(`Spawned ${newBody.name} in orbit around ${primary ? primary.name : "deep space"}`);
   }
 
   function setLaunchMode(mode) {
+    if (mode === "autoOrbit") mode = "orbit";
     state.launchMode = mode;
-    ui.autoOrbitMode?.classList.toggle("active", mode === "autoOrbit");
-    ui.impactMode.classList.toggle("active", mode === "impact");
-    ui.orbitMode.classList.toggle("active", mode === "orbit");
-    ui.binaryMode.classList.toggle("active", mode === "binary");
-    ui.autoOrbitMode?.setAttribute("aria-pressed", String(mode === "autoOrbit"));
-    ui.impactMode.setAttribute("aria-pressed", String(mode === "impact"));
-    ui.orbitMode.setAttribute("aria-pressed", String(mode === "orbit"));
-    ui.binaryMode.setAttribute("aria-pressed", String(mode === "binary"));
+    if (ui.autoOrbitMode) {
+      ui.autoOrbitMode.classList.toggle("active", mode === "orbit");
+      ui.autoOrbitMode.setAttribute("aria-pressed", String(mode === "orbit"));
+    }
+    if (ui.orbitMode) {
+      ui.orbitMode.classList.toggle("active", mode === "orbit");
+      ui.orbitMode.setAttribute("aria-pressed", String(mode === "orbit"));
+    }
+    if (ui.impactMode) {
+      ui.impactMode.classList.toggle("active", mode === "impact");
+      ui.impactMode.setAttribute("aria-pressed", String(mode === "impact"));
+    }
+    if (ui.binaryMode) {
+      ui.binaryMode.classList.toggle("active", mode === "binary");
+      ui.binaryMode.setAttribute("aria-pressed", String(mode === "binary"));
+    }
 
     if (ui.impactOptions) ui.impactOptions.hidden = mode !== "impact";
     if (ui.orbitOptions) ui.orbitOptions.hidden = mode === "impact";
 
-    if (ui.launchAtTarget) {
-      ui.launchAtTarget.innerHTML = mode === "autoOrbit"
-        ? "<span>✦</span> Click anywhere on screen to spawn"
-        : mode === "binary"
-        ? "<span>∞</span> Place binary with mouse"
-        : mode === "orbit"
-        ? "<span>◉</span> Place orbit around target"
-        : "<span>➤</span> Launch at selected target";
-    }
-
     if (ui.launchNote) {
-      ui.launchNote.textContent = mode === "autoOrbit"
-        ? "Wherever your mouse goes on screen, a new planet will spawn and naturally orbit the nearest star or dominant planet!"
-        : mode === "binary"
-        ? "The new body is mass-matched and both objects are placed around their shared barycenter."
-        : mode === "orbit"
-        ? "After pressing the button, move the mouse around the target to set distance, then click to create the orbit."
-        : "The object spawns outside the target and automatically aims toward it.";
+      ui.launchNote.textContent = mode === "impact"
+        ? "Click and drag on any body to launch an impactor directly at it!"
+        : "✦ Move your cursor on screen to position the orbit, then click anywhere to spawn!";
     }
   }
 
@@ -5063,6 +5203,7 @@ function toggleMoons(engage = !state.moonsEngaged) {
     canvas.addEventListener("pointerleave", () => { state.hoveredId = null; });
     canvas.addEventListener("pointerdown", (event) => {
       canvas.setPointerCapture(event.pointerId);
+      const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && ui.launchPanel.classList.contains("open"));
       if (state.orbitPlacement) {
         state.pointer.x = event.offsetX;
         state.pointer.y = event.offsetY;
@@ -5079,45 +5220,48 @@ function toggleMoons(engage = !state.moonsEngaged) {
       }
       state.pointer.downX = state.pointer.x = event.offsetX;
       state.pointer.downY = state.pointer.y = event.offsetY;
+      state.pointer.lastX = event.offsetX;
+      state.pointer.lastY = event.offsetY;
       state.pointer.dragging = true;
       state.pointer.moved = false;
       const world = screenToWorld(event.offsetX, event.offsetY);
       state.pointer.worldX = world.x;
       state.pointer.worldY = world.y;
-      if (state.addMode) state.launchStart = world;
+      if (state.addMode || isLauncherOpen) state.launchStart = world;
       else {
         state.followBodyId = null;
         canvas.classList.add("dragging");
       }
     });
     canvas.addEventListener("pointermove", (event) => {
+      state.pointer.x = event.offsetX;
+      state.pointer.y = event.offsetY;
       state.hoveredId = bodyAt(event.offsetX, event.offsetY)?.id ?? null;
       if (state.orbitPlacement) {
-        state.pointer.x = event.offsetX;
-        state.pointer.y = event.offsetY;
         updateOrbitPlacement(event.offsetX, event.offsetY);
         return;
       }
       if (state.grabbedBodyId != null) {
-        state.pointer.x = event.offsetX;
-        state.pointer.y = event.offsetY;
         state.pointer.moved = true;
         moveGrabbedBody(event.offsetX, event.offsetY);
         return;
       }
-      const dx = event.offsetX - state.pointer.x;
-      const dy = event.offsetY - state.pointer.y;
-      state.pointer.x = event.offsetX;
-      state.pointer.y = event.offsetY;
-      if (!state.pointer.dragging) return;
-      if (Math.hypot(event.offsetX - state.pointer.downX, event.offsetY - state.pointer.downY) > 3) state.pointer.moved = true;
-      if (!state.addMode) {
+      const dx = event.offsetX - state.pointer.downX;
+      const dy = event.offsetY - state.pointer.downY;
+      if (Math.hypot(dx, dy) > 6) state.pointer.moved = true;
+      const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && ui.launchPanel.classList.contains("open"));
+      if (state.pointer.dragging && !state.addMode && !isLauncherOpen) {
+        const moveDx = event.offsetX - (state.pointer.lastX ?? event.offsetX);
+        const moveDy = event.offsetY - (state.pointer.lastY ?? event.offsetY);
         state.followBodyId = null;
-        state.camera.x -= dx / state.camera.zoom;
-        state.camera.y -= dy / state.camera.zoom;
+        state.camera.x -= moveDx / state.camera.zoom;
+        state.camera.y -= moveDy / state.camera.zoom;
       }
+      state.pointer.lastX = event.offsetX;
+      state.pointer.lastY = event.offsetY;
     });
     canvas.addEventListener("pointerup", (event) => {
+      const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && ui.launchPanel.classList.contains("open"));
       if (state.orbitPlacement) {
         updateOrbitPlacement(event.offsetX, event.offsetY);
         createOrbitalBody();
@@ -5128,8 +5272,8 @@ function toggleMoons(engage = !state.moonsEngaged) {
         finishBodyDrag();
         return;
       }
-      if (state.addMode && state.launchStart) {
-        if (state.launchMode === "autoOrbit") {
+      if ((state.addMode || isLauncherOpen) && state.launchStart) {
+        if (state.launchMode === "orbit" || state.launchMode === "autoOrbit") {
           const world = screenToWorld(event.offsetX, event.offsetY);
           spawnAutoOrbitPlanet(world.x, world.y);
         } else {
@@ -5167,7 +5311,7 @@ function toggleMoons(engage = !state.moonsEngaged) {
     ui.loadPreset.addEventListener("click", () => loadPreset(ui.presetSelect.value));
     ui.resetSimulation.addEventListener("click", restoreSnapshot);
     ui.clearSimulation.addEventListener("click", () => {
-      cancelOrbitPlacement(); toggleMoveMode(false); state.bodies = []; state.effects = []; state.selectedId = null; state.simYears = 0; updateSelectionUI(); renderSystemRoster(); toast("Universe cleared");
+      cancelOrbitPlacement(); toggleMoveMode(false); state.bodies = []; state.effects = []; state.selectedId = null; state.simYears = 0; updateSelectionUI(); if (typeof renderSystemRoster === "function") renderSystemRoster(); toast("Universe cleared");
     });
     ui.fitView.addEventListener("click", () => fitView());
     ui.fitViewTopBtn?.addEventListener("click", () => fitView());
@@ -5184,25 +5328,47 @@ function toggleMoons(engage = !state.moonsEngaged) {
     ui.addBody.addEventListener("click", openLauncher);
     ui.newPlanetTop.addEventListener("click", openLauncher);
     ui.closeLauncher.addEventListener("click", closeLauncher);
-    ui.launchAtTarget.addEventListener("click", launchAtSelectedTarget);
-    ui.autoOrbitMode?.addEventListener("click", () => setLaunchMode("autoOrbit"));
+    ui.launchAtTarget?.addEventListener("click", launchAtSelectedTarget);
+    ui.autoOrbitMode?.addEventListener("click", () => setLaunchMode("orbit"));
     ui.impactMode.addEventListener("click", () => setLaunchMode("impact"));
     ui.orbitMode.addEventListener("click", () => setLaunchMode("orbit"));
-    ui.binaryMode.addEventListener("click", () => setLaunchMode("binary"));
+    ui.binaryMode?.addEventListener("click", () => setLaunchMode("binary"));
     ui.spawnTypes.addEventListener("change", () => {
       const type = document.querySelector('input[name="spawnType"]:checked')?.value;
       ui.starTypeField.hidden = type !== "star";
     });
-    ui.eccentricity.addEventListener("input", () => {
-      const value = Number(ui.eccentricity.value) / 100;
-      ui.eccentricityValue.value = value.toFixed(2);
-      updateOrbitReadout();
+    if (ui.eccentricity) {
+      ui.eccentricity.addEventListener("input", () => {
+        const value = Number(ui.eccentricity.value) / 100;
+        if (ui.eccentricityValue) {
+          ui.eccentricityValue.textContent = value === 0 ? "0.00 (Circle)" : `${value.toFixed(2)} (Elliptical)`;
+        }
+      });
+    }
+
+    const launchGasSelect = document.getElementById("launchCustomGas");
+    const customGasBreakdown = document.getElementById("customGasBreakdown");
+    if (launchGasSelect && customGasBreakdown) {
+      launchGasSelect.addEventListener("change", () => {
+        customGasBreakdown.style.display = launchGasSelect.value === "customMix" ? "block" : "none";
+      });
+    }
+
+    ["N2", "O2", "CO2", "CH4"].forEach(gas => {
+      const slider = document.getElementById(`customGas${gas}`);
+      const val = document.getElementById(`customGas${gas}Val`);
+      if (slider && val) {
+        slider.addEventListener("input", () => {
+          val.textContent = `${slider.value}%`;
+        });
+      }
     });
-    ui.systemRoster.addEventListener("click", (event) => {
+
+    ui.systemRoster?.addEventListener("click", (event) => {
       const item = event.target.closest(".roster-body");
       if (!item) return;
       state.launchTargetId = Number(item.dataset.bodyId);
-      renderSystemRoster();
+      if (typeof renderSystemRoster === "function") renderSystemRoster();
     });
     ui.impactSpeed.addEventListener("input", () => {
       ui.impactSpeedValue.value = ["Low", "Medium", "High"][Number(ui.impactSpeed.value) - 1];
