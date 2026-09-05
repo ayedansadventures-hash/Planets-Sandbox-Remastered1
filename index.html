@@ -72,7 +72,6 @@
               <label><input id="showGrid" type="checkbox" /><span></span>Grid</label>
               <label><input id="showVelocity" type="checkbox" /><span></span>Velocity</label>
               <label><input id="showOrbits" type="checkbox" checked /><span></span>Orbits</label>
-              <label><input id="showHabitableZone" type="checkbox" checked /><span></span>Habitable Zone</label>
             </div>
           </section>
 
@@ -128,6 +127,7 @@
                   <button type="button" class="tab-btn active" id="tabBandsBtn">🪐 Bands</button>
                   <button type="button" class="tab-btn" id="tabWaterBtn">🌊 Water &amp; Ice</button>
                   <button type="button" class="tab-btn" id="tabAtmoBtn">🧪 Atmosphere</button>
+                  <button type="button" class="tab-btn" id="tabRingsBtn">💍 Rings</button>
                 </div>
 
                 <!-- BANDS TAB -->
@@ -204,7 +204,20 @@
                       <input id="atmoHaze" type="range" min="0" max="100" value="60" />
                     </div>
                   </div>
+                                <!-- RINGS TAB -->
+                <div class="customizer-panel" id="panelRings" style="display: none;">
+                  <div class="toggle-grid" style="margin-bottom: 12px;">
+                    <label><input id="bodyHasRing" type="checkbox" checked /><span></span>Enable Planetary Rings</label>
+                  </div>
+                  <div class="range-field">
+                    <div class="range-label"><label for="bodyRingScale">Ring Width / Extent</label><output id="bodyRingScaleValue">1.0×</output></div>
+                    <input id="bodyRingScale" type="range" min="0.8" max="3.8" step="0.1" value="1.0" />
+                  </div>
+                  <div class="field-row">
+                    <label class="stacked-field color-field">Ring Tone<input id="bodyRingColor" type="color" value="#d7bd7d" /></label>
+                  </div>
                 </div>
+              </div>
               </div>
 
               <div class="science-card">
@@ -325,9 +338,15 @@
             <label class="spawn-card"><input type="radio" name="spawnType" value="gasGiant" /><span class="spawn-orb gas-orb"></span><strong>Gas giant</strong><small>Massive, hydrogen-rich</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="planet" /><span class="spawn-orb earth-orb"></span><strong>Normal planet</strong><small>Rocky, Earth-like</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="hotPlanet" /><span class="spawn-orb hot-orb"></span><strong>Hot planet</strong><small>Molten, high energy</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="customPlanet" /><span class="spawn-orb custom-orb"></span><strong>Custom Planet</strong><small>Design surface &amp; atmo</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="star" /><span class="spawn-orb star-orb"></span><strong>Sun or star</strong><small>Choose a stellar class</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="blackHole" /><span class="spawn-orb blackhole-orb"></span><strong>Black Hole</strong><small>Singularity &amp; disk</small></label>
+                    <div id="gasGiantRingOption" style="margin-top: 10px; padding: 8px 12px; background: rgba(14, 25, 44, 0.65); border: 1px solid rgba(132, 169, 224, 0.15); border-radius: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; cursor: pointer;">
+              <input id="spawnRings" type="checkbox" checked /> Include Planetary Ring System
+            </label>
           </div>
+</div>
           <label class="stacked-field star-type-field" id="starTypeField" hidden>Star type
             <select id="starType">
               <option value="gStar">G-type · Sun-like</option>
@@ -413,6 +432,6 @@
     </dialog>
 
     <script src="space-visuals.js?v=20260905"></script>
-    <script src="app.js?v=20260905_v3"></script>
+    <script src="app.js?v=20260905_v4"></script>
   </body>
 </html>

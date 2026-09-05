@@ -147,6 +147,7 @@ input[type="color"] { width: 100%; height: 36px; padding: 3px; border: 1px solid
 .hot-orb { color: #ff7148; background: radial-gradient(circle at 30% 25%, #ffd36b, #e95031 45%, #5b1716 75%); }
 .star-orb { color: #ffd678; background: radial-gradient(circle at 35% 30%, #fffbd2, #ffc34f 38%, #f06c2d 70%, #732316); box-shadow: 0 0 18px currentColor; }
 .blackhole-orb { color: #000; background: radial-gradient(circle at 50% 50%, #000000 52%, #fb923c 70%, #38bdf8 88%); box-shadow: 0 0 18px rgba(251, 146, 60, 0.7); }
+.custom-orb { color: #a855f7; background: radial-gradient(circle at 35% 30%, #f3e8ff, #a855f7 48%, #4c1d95 88%); box-shadow: 0 0 16px rgba(168, 85, 247, 0.75); }
 .star-type-field { margin: 12px 0 2px; padding: 12px; border: 1px solid rgba(255,190,91,.16); border-radius: 9px; background: rgba(35,23,10,.35); }
 .star-type-field[hidden] { display: none; }
 .target-heading { display: flex; justify-content: space-between; align-items: flex-end; margin: 23px 0 10px; }

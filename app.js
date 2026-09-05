@@ -282,11 +282,12 @@
     rock: { className: "Rocky body", summary: "Airless terrestrial object", composition: "Silicate rock and iron", atmosphere: "Trace gases", temperature: "Variable", density: "4.1 g/cm³", magnetic: .08, magneticLabel: "0.08× Earth", magneticNote: "Only a weak remnant or induced field is present." },
   };
 
-  const spawnCatalog = {
+const spawnCatalog = {
     asteroid: { label: "Asteroid", mass: 8.6e-7, radius: .026, collisionRadius: 80 / KM_PER_AU, color: "#9c8778", texture: "rock", scienceType: "asteroid" },
-    gasGiant: { label: "Gas giant", mass: 180, radius: .12, collisionRadius: 60000 / KM_PER_AU, color: "#d19a68", texture: "jupiter", scienceType: "gasGiant", ring: true },
-    planet: { label: "New planet", mass: 1, radius: .055, collisionRadius: EARTH_RADIUS_AU, color: "#4d9fe8", texture: "earth", scienceType: "planet" },
-    hotPlanet: { label: "Hot planet", mass: 2.5, radius: .064, collisionRadius: 8500 / KM_PER_AU, color: "#f05b38", texture: "mars", scienceType: "hotPlanet" },
+    gasGiant: { label: "Gas giant", mass: 180, radius: .12, collisionRadius: 60000 / KM_PER_AU, color: "#d19a68", texture: "proceduralGas", scienceType: "gasGiant", ring: true, ringScale: 1.25, bandCount: 8, bandPalette: "jupiterGold" },
+    planet: { label: "New planet", mass: 1, radius: .055, collisionRadius: EARTH_RADIUS_AU, color: "#4d9fe8", texture: "earth", scienceType: "planet", waterCoverage: 71, vegetationLevel: 1.0 },
+    hotPlanet: { label: "Hot planet", mass: 2.5, radius: .064, collisionRadius: 8500 / KM_PER_AU, color: "#ea580c", texture: "proceduralHot", scienceType: "hotPlanet", isLavaWorld: true, scorchLevel: 0.85, temperatureKelvin: 1100 },
+    customPlanet: { label: "Custom planet", mass: 1.2, radius: .06, collisionRadius: EARTH_RADIUS_AU * 1.05, color: "#8b5cf6", texture: "customPlanet", scienceType: "planet", customAtmosphere: true, gasType: "earthAir", atmoPressure: 1.0, atmoHaze: 60, atmoColor: "#60a5fa", waterCoverage: 65, landColor: "#15803d", oceanColor: "#1d4ed8", iceCapCoverage: 18, vegetationLevel: 1.0, ring: false },
     star: { label: "Star", mass: 332946, radius: .19, collisionRadius: 696340 / KM_PER_AU, color: "#ffb13b", texture: "sun", scienceType: "star" },
     blackHole: { label: "Black Hole", mass: 332946 * 3.5, radius: .14, collisionRadius: 15000 / KM_PER_AU, color: "#05070f", texture: "blackHole", scienceType: "blackHole", isBlackHole: true },
   };
@@ -2109,6 +2110,91 @@ function closestEncounterStep() {
     }
 
     state.simYears += requestedDt;
+    // Thermodynamic & Biosphere Simulation: Climate changes continuously based on distance to star
+    const dominantStars = state.bodies.filter(b => (b.texture === "sun" || b.scienceType === "star") || b.mass * EARTHS_PER_SUN > 10000);
+    for (const body of state.bodies) {
+      if (body.texture === "sun" || body.scienceType === "star" || body.isBlackHole) continue;
+
+      let nearestStar = null;
+      let minStarDist = Infinity;
+      for (const s of dominantStars) {
+        const d = Math.hypot(body.x - s.x, body.y - s.y);
+        if (d < minStarDist) {
+          minStarDist = d;
+          nearestStar = s;
+        }
+      }
+
+      if (nearestStar) {
+        const hz = getHabitableZone(nearestStar);
+        const lum = hz ? hz.luminosity : (nearestStar.mass || 1);
+        const targetTemp = Math.round(278 * Math.pow(lum, 0.25) / Math.sqrt(Math.max(minStarDist, 0.005)));
+        
+        // Gradual thermal transition over time
+        const thermalRate = Math.min(1.0, 0.65 * (requestedDt * 365.25));
+        body.temperatureKelvin = (body.temperatureKelvin || 288) + (targetTemp - (body.temperatureKelvin || 288)) * thermalRate;
+
+        // Dynamic surface & climate evolution for terrestrial / custom worlds
+        if (body.texture === "earth" || body.scienceType === "planet" || body.texture === "customPlanet" || body.texture === "rock") {
+          if (body.baselineWater === undefined) body.baselineWater = body.waterCoverage ?? (body.texture === "earth" ? 71 : 0);
+          if (body.vegetationLevel === undefined) body.vegetationLevel = 1.0;
+
+          // 1. Moving Closer to Star: Extreme Heat, Evaporation & Volcanism
+          if (body.temperatureKelvin > 310) {
+            // Vegetation withers into dry yellow-brown
+            const witherRate = Math.min(1.0, 0.22 * (requestedDt * 365.25));
+            body.vegetationLevel = Math.max(0, body.vegetationLevel - witherRate);
+
+            // Water boils away
+            if (body.temperatureKelvin > 340) {
+              const boilRate = Math.min(1.0, (0.04 + (body.temperatureKelvin - 340) * 0.0018) * (requestedDt * 365.25) * 45);
+              body.waterCoverage = Math.max(0, (body.waterCoverage ?? 71) - boilRate);
+            }
+
+            // Scorched crust & volcanic transition
+            if (body.temperatureKelvin > 440) {
+              body.scorchLevel = Math.min(1.0, (body.scorchLevel || 0) + 0.12 * thermalRate);
+            }
+            if (body.temperatureKelvin > 720) {
+              body.isLavaWorld = true;
+            }
+            body.iceCapCoverage = Math.max(0, (body.iceCapCoverage || 0) - 2.5 * thermalRate);
+
+          // 2. Moving Farther from Star: Freezing Ice World
+          } else if (body.temperatureKelvin < 268) {
+            const freezeRate = Math.min(1.0, 0.35 * (requestedDt * 365.25) * 35);
+            body.iceCapCoverage = Math.min(100, (body.iceCapCoverage || 18) + freezeRate);
+            if (body.temperatureKelvin < 235) {
+              body.vegetationLevel = Math.max(0, body.vegetationLevel - 0.25 * thermalRate);
+            }
+            body.scorchLevel = Math.max(0, (body.scorchLevel || 0) - 0.25 * thermalRate);
+            body.isLavaWorld = false;
+
+          // 3. In Habitable Zone: Climate Stabilizes
+          } else {
+            const thawRate = Math.min(1.0, 0.25 * (requestedDt * 365.25) * 20);
+            body.iceCapCoverage = Math.max(15, (body.iceCapCoverage || 18) - thawRate);
+            if (body.baselineWater > 0 && (body.waterCoverage ?? 0) < body.baselineWater) {
+              body.waterCoverage = Math.min(body.baselineWater, (body.waterCoverage || 0) + thawRate);
+            }
+            body.vegetationLevel = Math.min(1.0, (body.vegetationLevel || 0) + 0.18 * thermalRate);
+            body.scorchLevel = Math.max(0, (body.scorchLevel || 0) - 0.35 * thermalRate);
+            body.isLavaWorld = false;
+          }
+
+          // Dynamic continent coloring based on living vegetation and scorched rock
+          if (body.scorchLevel > 0.4) {
+            body.landColor = "#381c14"; // scorched basalt
+          } else if (body.vegetationLevel > 0.65) {
+            body.landColor = "#15803d"; // lush living green
+          } else if (body.vegetationLevel > 0.25) {
+            body.landColor = "#ca8a04"; // dry savanna yellow-green
+          } else {
+            body.landColor = "#92400e"; // arid desert brown
+          }
+        }
+      }
+    }
     const achievedSpeed = requestedDt / DAY_TO_YEAR / Math.max(wallSeconds, .001);
     state.effectiveSpeedDays += (achievedSpeed - state.effectiveSpeedDays) * .25;
     
@@ -2364,8 +2450,8 @@ function drawOrbitGuides() {
   }
 
   function drawHabitableZones() {
-    const isSpawning = state.addMode || state.orbitPlacement || state.moveMode;
-    if (!state.showHabitableZone && !isSpawning) return;
+    // Only show Habitable Zone and Roche limit when the user has clicked "New Planet"
+    if (!state.addMode && !state.orbitPlacement) return;
 
     for (const body of state.bodies) {
       const hz = getHabitableZone(body);
@@ -2829,9 +2915,11 @@ function drawMagnetosphere(body, radius) {
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
     ctx.save();
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.clip();
-    const hasCustomBands = body.bandCount && body.bandCount > 0;
+const hasCustomBands = body.bandCount && body.bandCount > 0;
     const hasCustomWater = body.waterCoverage !== undefined && body.waterCoverage > 0 && body.texture !== "earth";
-    if (hasCustomBands || hasCustomWater || !drawNasaTexture(body, radius)) {
+    const isThermallyAlteredEarth = body.texture === "earth" && (body.scorchLevel > 0.08 || body.temperatureKelvin > 312 || body.temperatureKelvin < 268);
+    const isProcedural = body.texture === "proceduralHot" || body.texture === "proceduralGas" || body.texture === "customPlanet";
+    if (isProcedural || isThermallyAlteredEarth || hasCustomBands || hasCustomWater || !drawNasaTexture(body, radius)) {
       drawTexture(body, radius);
     }
 
@@ -2996,6 +3084,101 @@ function drawMagnetosphere(body, radius) {
   }
 
   function drawTexture(body, radius) {
+    // Procedural Hot Planet / Molten Lava Planet Texture
+    if (body.texture === "proceduralHot" || (body.isLavaWorld && body.texture !== "sun")) {
+      const seed = body.proceduralSeed || ((body.id || 1) * 73.19);
+      const time = performance.now() * 0.0018;
+
+      // Dark volcanic basalt mantle
+      ctx.fillStyle = "#1c1917";
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Molten magma convective lakes & fissures
+      ctx.save();
+      for (let k = 0; k < 6; k++) {
+        const ang = seed + k * 1.08;
+        const dist = radius * (0.3 + (k % 3) * 0.2);
+        const lakeR = radius * (0.22 + (k % 2) * 0.14);
+        const lx = Math.cos(ang) * dist;
+        const ly = Math.sin(ang) * dist;
+
+        const lakeGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, lakeR);
+        lakeGrad.addColorStop(0, "#fef08a"); // white-yellow heat
+        lakeGrad.addColorStop(0.35, "#f97316"); // bright orange
+        lakeGrad.addColorStop(0.75, "#dc2626"); // molten crimson
+        lakeGrad.addColorStop(1, "rgba(28, 25, 23, 0)");
+
+        ctx.fillStyle = lakeGrad;
+        ctx.beginPath();
+        ctx.arc(lx, ly, lakeR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Glowing volcanic tectonic fractures
+      ctx.strokeStyle = "rgba(254, 215, 170, 0.85)";
+      ctx.lineWidth = Math.max(0.8, radius * 0.03);
+      ctx.shadowColor = "#f97316";
+      ctx.shadowBlur = Math.max(2, radius * 0.12);
+      ctx.beginPath();
+      for (let f = 0; f < 5; f++) {
+        const fang = seed * 1.3 + f * 1.35;
+        const fx1 = Math.cos(fang) * radius * 0.75;
+        const fy1 = Math.sin(fang) * radius * 0.75;
+        const fx2 = Math.cos(fang + 0.9) * radius * 0.65;
+        const fy2 = Math.sin(fang + 0.9) * radius * 0.65;
+        ctx.moveTo(fx1, fy1);
+        ctx.quadraticCurveTo(0, 0, fx2, fy2);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Atmospheric sulfur haze
+      const limb = ctx.createRadialGradient(-radius * 0.3, -radius * 0.35, radius * 0.08, 0, 0, radius * 1.03);
+      limb.addColorStop(0, "rgba(255, 255, 255, 0.1)");
+      limb.addColorStop(0.65, "rgba(0, 0, 0, 0)");
+      limb.addColorStop(1, "rgba(20, 10, 5, 0.85)");
+      ctx.fillStyle = limb;
+      ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+      return;
+    }
+
+    // Procedural Gas Giant Texture with Bands & Storms
+    if (body.texture === "proceduralGas") {
+      const palette = bandPalettes[body.bandPalette] || bandPalettes.jupiterGold;
+      const count = body.bandCount || 8;
+      const colors = palette.colors;
+      const seed = body.proceduralSeed || ((body.id || 1) * 31.4);
+
+      for (let i = 0; i < count; i++) {
+        const c1 = colors[i % colors.length];
+        const bandH = (radius * 2) / count;
+        const y = -radius + i * bandH;
+        ctx.fillStyle = c1;
+        ctx.fillRect(-radius, y, radius * 2, bandH + 0.5);
+
+        // Zonal shear ripples
+        ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+        ctx.fillRect(-radius, y + bandH * 0.4, radius * 2, bandH * 0.2);
+      }
+
+      // Great Storm Vortex
+      const stormY = radius * (0.2 + (seed % 0.3));
+      const stormX = radius * (0.25 - ((seed * 2) % 0.5));
+      ctx.fillStyle = palette.storm || "#f43f5e";
+      ctx.beginPath();
+      ctx.ellipse(stormX, stormY, radius * 0.22, radius * 0.11, -0.08, 0, Math.PI * 2);
+      ctx.fill();
+
+      const limb = ctx.createRadialGradient(-radius * 0.3, -radius * 0.35, radius * 0.08, 0, 0, radius * 1.03);
+      limb.addColorStop(0, "rgba(255, 255, 255, 0.12)");
+      limb.addColorStop(0.55, "rgba(0, 0, 0, 0)");
+      limb.addColorStop(1, "rgba(2, 6, 16, 0.72)");
+      ctx.fillStyle = limb;
+      ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+      return;
+    }
     // 1. Procedural Atmospheric Bands (Universe Sandbox 2 style multi-band gas giants & banded worlds)
     if (body.bandCount && body.bandCount > 0) {
       const count = Math.max(1, body.bandCount);
@@ -3876,7 +4059,17 @@ const point = bodyDisplayPoint(body);
 
     
     // Populate Planet Customizer Fields
-    if (ui.bandCount) {
+          if (document.getElementById("bodyHasRing")) {
+        document.getElementById("bodyHasRing").checked = Boolean(body.ring);
+      }
+      if (document.getElementById("bodyRingScale")) {
+        document.getElementById("bodyRingScale").value = String(body.ringScale ?? 1.0);
+        document.getElementById("bodyRingScaleValue").textContent = `${parseFloat(body.ringScale ?? 1.0).toFixed(1)}×`;
+      }
+      if (document.getElementById("bodyRingColor")) {
+        document.getElementById("bodyRingColor").value = body.ringColor || "#d7bd7d";
+      }
+      if (ui.bandCount) {
       ui.bandCount.value = body.bandCount ?? 0;
       ui.bandCountValue.value = body.bandCount ?? 0;
     }
@@ -4660,6 +4853,55 @@ const point = bodyDisplayPoint(body);
   }
 
   function bindEvents() {
+    // Customizer Rings Tab & Controls
+    const tabRingsBtn = document.getElementById("tabRingsBtn");
+    const panelRings = document.getElementById("panelRings");
+    const bodyHasRing = document.getElementById("bodyHasRing");
+    const bodyRingScale = document.getElementById("bodyRingScale");
+    const bodyRingScaleValue = document.getElementById("bodyRingScaleValue");
+    const bodyRingColor = document.getElementById("bodyRingColor");
+
+    if (tabRingsBtn && panelRings) {
+      tabRingsBtn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".customizer-panel").forEach(p => { p.classList.remove("active"); p.style.display = "none"; });
+        tabRingsBtn.classList.add("active");
+        panelRings.classList.add("active");
+        panelRings.style.display = "block";
+      });
+    }
+
+    if (bodyHasRing) {
+      bodyHasRing.addEventListener("change", () => {
+        const body = selectedBody();
+        if (body) { body.ring = bodyHasRing.checked; }
+      });
+    }
+
+    if (bodyRingScale && bodyRingScaleValue) {
+      bodyRingScale.addEventListener("input", () => {
+        bodyRingScaleValue.textContent = `${parseFloat(bodyRingScale.value).toFixed(1)}×`;
+        const body = selectedBody();
+        if (body) { body.ringScale = parseFloat(bodyRingScale.value); }
+      });
+    }
+
+    if (bodyRingColor) {
+      bodyRingColor.addEventListener("input", () => {
+        const body = selectedBody();
+        if (body) { body.ringColor = bodyRingColor.value; }
+      });
+    }
+
+    // Toggle Gas Giant Ring Option visibility in launcher
+    document.querySelectorAll('input[name="spawnType"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        const ringOpt = document.getElementById("gasGiantRingOption");
+        if (ringOpt) {
+          ringOpt.style.display = (radio.value === "gasGiant" || radio.value === "customPlanet") ? "block" : "none";
+        }
+      });
+    });
     window.addEventListener("resize", resizeCanvas);
     canvas.addEventListener("pointerleave", () => { state.hoveredId = null; });
     canvas.addEventListener("pointerdown", (event) => {
