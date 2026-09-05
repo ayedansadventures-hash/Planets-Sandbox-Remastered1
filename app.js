@@ -215,6 +215,7 @@
     showGrid: false,
     showVelocity: false,
     showOrbits: true,
+    showHabitableZone: true,
     solarFlaresEnabled: true,
     lensFlaresEnabled: true,
     auroraEnabled: true,
@@ -2360,6 +2361,96 @@ function drawOrbitGuides() {
     }
   }
 
+  function drawHabitableZones() {
+    const isSpawning = state.addMode || state.orbitPlacement || state.moveMode;
+    if (!state.showHabitableZone && !isSpawning) return;
+
+    for (const body of state.bodies) {
+      const hz = getHabitableZone(body);
+      if (!hz) continue;
+
+      const starScreen = worldToScreen(body.x, body.y);
+      const innerRadius = hz.innerAU * state.camera.zoom;
+      const outerRadius = hz.outerAU * state.camera.zoom;
+
+      // 1. Roche Limit Hazard Zone
+      const referenceMass = 1 / EARTHS_PER_SUN;
+      const rocheDist = rocheLimit(body, referenceMass, EARTH_RADIUS_AU);
+      const rocheRadius = Math.max(rocheDist * state.camera.zoom, visualRadius(body) * 2.2);
+
+      ctx.save();
+      // Roche Limit Disruption Disk Shading
+      const rocheGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, visualRadius(body), starScreen.x, starScreen.y, rocheRadius);
+      rocheGrad.addColorStop(0, "rgba(239, 68, 68, 0.16)");
+      rocheGrad.addColorStop(0.8, "rgba(239, 68, 68, 0.08)");
+      rocheGrad.addColorStop(1, "rgba(239, 68, 68, 0)");
+      ctx.fillStyle = rocheGrad;
+      ctx.beginPath();
+      ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Roche Limit Warning Ring
+      ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (rocheRadius > 25) {
+        ctx.setLineDash([]);
+        ctx.font = "700 9px Inter, sans-serif";
+        ctx.fillStyle = "rgba(252, 165, 165, 0.95)";
+        ctx.textAlign = "center";
+        ctx.fillText(`💥 ROCHE LIMIT (${formatDistance(rocheDist)}) — TIDAL SHREDDING`, starScreen.x, starScreen.y - rocheRadius - 6);
+      }
+
+      // 2. Habitable Zone Annulus (Goldilocks Zone)
+      if (outerRadius > 10) {
+        const time = performance.now() * 0.0015;
+        const pulse = Math.sin(time * 2) * 0.03 + 0.97;
+
+        // Radial Annulus Gradient Fill
+        const bandGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, innerRadius, starScreen.x, starScreen.y, outerRadius);
+        bandGrad.addColorStop(0, "rgba(245, 158, 11, 0.18)");   // warm inner boundary
+        bandGrad.addColorStop(0.3, "rgba(52, 211, 153, 0.16)"); // lush emerald habitable center
+        bandGrad.addColorStop(0.7, "rgba(56, 189, 248, 0.14)"); // cyan-blue ocean zone
+        bandGrad.addColorStop(1, "rgba(96, 165, 250, 0.04)");   // outer cold boundary
+
+        ctx.fillStyle = bandGrad;
+        ctx.beginPath();
+        ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
+        ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2, true);
+        ctx.fill();
+
+        // Inner Edge (Runaway Greenhouse)
+        ctx.strokeStyle = "rgba(245, 158, 11, 0.55)";
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Outer Edge (Maximum Greenhouse)
+        ctx.strokeStyle = "rgba(96, 165, 250, 0.55)";
+        ctx.beginPath();
+        ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Central Habitable Zone Badge
+        const midRadius = (innerRadius + outerRadius) * 0.5;
+        if (outerRadius - innerRadius > 18) {
+          ctx.font = "700 9px Inter, sans-serif";
+          ctx.fillStyle = "rgba(110, 231, 183, 0.95)";
+          ctx.textAlign = "center";
+          ctx.fillText(`🌿 HABITABLE ZONE (${formatDistance(hz.innerAU)} – ${formatDistance(hz.outerAU)}) — Liquid Water & Life`, starScreen.x, starScreen.y - midRadius);
+        }
+      }
+      ctx.restore();
+    }
+  }
+
   function drawRocheZones() {
     for (const primary of state.bodies) {
       const active = primary.id === state.selectedId || primary.id === state.hoveredId || state.bodies.some((body) => body.tidalPrimaryId === primary.id && body.tidalStress > 0);
@@ -3404,38 +3495,124 @@ function drawMagnetosphere(body, radius) {
     }
   }
 
-  function drawLaunchPreview() {
+function drawLaunchPreview() {
     if (state.addMode && state.launchMode === "autoOrbit") {
       const mouseWorld = screenToWorld(state.pointer.x, state.pointer.y);
       const { spec } = currentSpawnSpec();
       const primary = findDominantGravityParent(mouseWorld.x, mouseWorld.y, spec.mass);
       const mouseScreen = { x: state.pointer.x, y: state.pointer.y };
       ctx.save();
+
       if (primary) {
         const primaryScreen = worldToScreen(primary.x, primary.y);
         const dist = Math.hypot(mouseWorld.x - primary.x, mouseWorld.y - primary.y);
-        ctx.strokeStyle = "rgba(102, 198, 255, 0.75)";
-        ctx.setLineDash([6, 6]);
-        ctx.lineWidth = 1.5;
+        const hz = getHabitableZone(primary);
+        const roche = rocheLimit(primary, spec.mass / EARTHS_PER_SUN, spec.collisionRadius);
+        const lum = hz ? hz.luminosity : (primary.mass || 1);
+        const tempK = Math.round(278 * Math.pow(lum, 0.25) / Math.sqrt(Math.max(dist, 0.005)));
+        const tempC = tempK - 273;
+
+        // Dynamic State Analysis
+        let previewColor = "#38bdf8";
+        let stateTitle = "Orbiting";
+        let stateSub = "";
+        let isRocheBreach = dist <= roche;
+        let isHabitable = hz && dist >= hz.innerAU && dist <= hz.outerAU;
+        let isTorrid = hz && dist < hz.innerAU && !isRocheBreach;
+
+        if (isRocheBreach) {
+          previewColor = "#ef4444";
+          stateTitle = "💥 ROCHE LIMIT: TIDAL SHREDDING ZONE";
+          stateSub = `Planet will be violently ripped apart by tidal gravity!`;
+        } else if (isTorrid) {
+          const heatRatio = clamp((hz.innerAU - dist) / Math.max(0.01, hz.innerAU - roche), 0, 1);
+          previewColor = heatRatio > 0.6 ? "#dc2626" : "#f97316";
+          stateTitle = `☀️ TORRID SCORCHED (${tempC}°C / ${tempK}K)`;
+          stateSub = `Atmosphere boils away into superheated magma!`;
+        } else if (isHabitable) {
+          previewColor = "#10b981";
+          stateTitle = `🌿 HABITABLE ZONE: LIFE SUSTAINING (${tempC}°C)`;
+          stateSub = `Ideal temperate climate for liquid oceans and life!`;
+        } else {
+          previewColor = "#93c5fd";
+          stateTitle = `❄️ FROZEN GLACIATED (${tempC}°C)`;
+          stateSub = `Beyond habitable boundary, locked in ice.`;
+        }
+
+        // Orbit preview track
+        ctx.strokeStyle = isRocheBreach ? "rgba(239, 68, 68, 0.85)" : isHabitable ? "rgba(52, 211, 153, 0.85)" : isTorrid ? "rgba(245, 158, 11, 0.75)" : "rgba(102, 198, 255, 0.75)";
+        ctx.setLineDash(isRocheBreach ? [3, 3] : [6, 6]);
+        ctx.lineWidth = isRocheBreach ? 2.0 : 1.5;
         ctx.beginPath();
         ctx.arc(primaryScreen.x, primaryScreen.y, dist * state.camera.zoom, 0, Math.PI * 2);
         ctx.stroke();
 
-        ctx.strokeStyle = "rgba(132, 191, 255, 0.4)";
+        // Connecting ray
+        ctx.strokeStyle = rgbaColor(previewColor, 0.45);
         ctx.beginPath();
         ctx.moveTo(primaryScreen.x, primaryScreen.y);
         ctx.lineTo(mouseScreen.x, mouseScreen.y);
         ctx.stroke();
 
-        ctx.fillStyle = "#38bdf8";
-        ctx.beginPath();
-        ctx.arc(mouseScreen.x, mouseScreen.y, Math.max(6, spec.radius * state.camera.zoom * 0.5), 0, Math.PI * 2);
-        ctx.fill();
+        // Planet preview body
+        const planetR = Math.max(7, spec.radius * state.camera.zoom * 0.5);
+        ctx.save();
+        ctx.translate(mouseScreen.x, mouseScreen.y);
 
-        ctx.font = "600 11px Inter, sans-serif";
-        ctx.fillStyle = "rgba(194, 225, 255, 0.95)";
+        if (isRocheBreach) {
+          // Elongate prolate spheroid along radial axis
+          const radAngle = Math.atan2(mouseWorld.y - primary.y, mouseWorld.x - primary.x);
+          ctx.rotate(radAngle);
+          ctx.scale(1.45, 0.7);
+
+          // White-hot core with crimson halo
+          const shredGrad = ctx.createRadialGradient(0, 0, planetR * 0.2, 0, 0, planetR * 1.5);
+          shredGrad.addColorStop(0, "#ffffff");
+          shredGrad.addColorStop(0.3, "#fde047");
+          shredGrad.addColorStop(0.7, "#ef4444");
+          shredGrad.addColorStop(1, "rgba(239, 68, 68, 0)");
+          ctx.fillStyle = shredGrad;
+          ctx.beginPath();
+          ctx.arc(0, 0, planetR * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#ef4444";
+          ctx.beginPath();
+          ctx.arc(0, 0, planetR, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Normal / Heated planet preview
+          const glowGrad = ctx.createRadialGradient(0, 0, planetR * 0.4, 0, 0, planetR * 1.8);
+          glowGrad.addColorStop(0, previewColor);
+          glowGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(0, 0, planetR * 1.8, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = previewColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, planetR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        // Multi-line HUD Tooltip Badge
+        ctx.save();
+        ctx.font = "700 11px Inter, sans-serif";
+        ctx.fillStyle = previewColor;
         ctx.textAlign = "left";
-        ctx.fillText(`Auto-orbiting ${primary.name} (${formatDistance(dist)})`, mouseScreen.x + 14, mouseScreen.y - 8);
+        ctx.fillText(stateTitle, mouseScreen.x + 16, mouseScreen.y - 12);
+
+        ctx.font = "500 10px Inter, sans-serif";
+        ctx.fillStyle = "rgba(226, 232, 240, 0.95)";
+        ctx.fillText(`Orbiting ${primary.name} at ${formatDistance(dist)}`, mouseScreen.x + 16, mouseScreen.y + 2);
+
+        ctx.font = "500 9px Inter, sans-serif";
+        ctx.fillStyle = "rgba(148, 163, 184, 0.9)";
+        ctx.fillText(stateSub, mouseScreen.x + 16, mouseScreen.y + 15);
+        ctx.restore();
+
       } else {
         ctx.fillStyle = "#38bdf8";
         ctx.beginPath();
@@ -3582,6 +3759,7 @@ function drawMagnetosphere(body, radius) {
       drawEvolutionEffects();
       drawOrbitGuides();
       drawRocheZones();
+      drawHabitableZones();
       drawTrails();
       drawStellarAccretionStreams();
       [...state.bodies].sort((a, b) => a.mass - b.mass).forEach(drawBody);
@@ -3880,6 +4058,34 @@ function drawMagnetosphere(body, radius) {
     }
     const distance = Math.hypot(body.x - primary.x, body.y - primary.y);
     return distance * Math.cbrt(gravitationalMass(body) / Math.max(3 * gravitationalMass(primary), 1e-15));
+  }
+
+  function getHabitableZone(star) {
+    if (!star) return null;
+    const isStar = star.texture === "sun" || star.scienceType === "star" || star.mass * EARTHS_PER_SUN > 10000;
+    if (!isStar && !star.isBlackHole && star.texture !== "blackHole") return null;
+
+    // Star mass in Solar units (Sun = 1.0)
+    const mSolar = Math.max(0.01, star.mass);
+    // Mass-luminosity relation: L ~ M^3.5 for main sequence stars
+    const lum = (star.isBlackHole || star.texture === "blackHole") ? 0.005 : clamp(Math.pow(mSolar, 3.5), 0.005, 50000);
+    const sqrtL = Math.sqrt(lum);
+
+    // Kasting & Kopparapu Habitable Zone boundaries (AU):
+    // Inner edge (Recent Venus / Runaway greenhouse): ~0.95 AU * sqrt(L)
+    // Outer edge (Maximum greenhouse / Early Mars): ~1.45 AU * sqrt(L)
+    const innerAU = 0.95 * sqrtL;
+    const outerAU = 1.45 * sqrtL;
+    const optInnerAU = 0.80 * sqrtL;
+    const optOuterAU = 1.68 * sqrtL;
+
+    return {
+      innerAU,
+      outerAU,
+      optInnerAU,
+      optOuterAU,
+      luminosity: lum,
+    };
   }
 
   function rocheLimit(primary, satelliteMass, satelliteRadius, satelliteGravityScale = 1) {
@@ -4604,7 +4810,7 @@ function drawMagnetosphere(body, radius) {
       ui.trailLengthValue.value = state.trailLength;
       for (const body of state.bodies) if (body.trail.length > state.trailLength) body.trail.splice(0, body.trail.length - state.trailLength);
     });
-    [["showTrails", "showTrails"], ["showLabels", "showLabels"], ["showGrid", "showGrid"], ["showVelocity", "showVelocity"], ["showOrbits", "showOrbits"], ["solarFlaresEnabled", "solarFlaresEnabled"], ["lensFlaresEnabled", "lensFlaresEnabled"], ["auroraEnabled", "auroraEnabled"], ["showAccretionDisk", "showAccretionDisk"]].forEach(([id, property]) => {
+    [["showTrails", "showTrails"], ["showLabels", "showLabels"], ["showGrid", "showGrid"], ["showVelocity", "showVelocity"], ["showOrbits", "showOrbits"], ["showHabitableZone", "showHabitableZone"], ["solarFlaresEnabled", "solarFlaresEnabled"], ["lensFlaresEnabled", "lensFlaresEnabled"], ["auroraEnabled", "auroraEnabled"], ["showAccretionDisk", "showAccretionDisk"]].forEach(([id, property]) => {
       if (ui[id]) ui[id].addEventListener("change", () => { state[property] = ui[id].checked; });
     });
 
