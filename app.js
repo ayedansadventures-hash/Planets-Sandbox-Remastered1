@@ -212,7 +212,7 @@
     trailLength: 180,
     showTrails: true,
     showLabels: true,
-    showGrid: true,
+    showGrid: false,
     showVelocity: false,
     showOrbits: true,
     solarFlaresEnabled: true,
@@ -1013,6 +1013,7 @@ return {
   }
 
   function buildStars() {
+    state.galaxyLayer = SpaceVisuals.galaxy(state.viewport.width, state.viewport.height);
     const count = Math.floor((state.viewport.width * state.viewport.height) / 5200);
     let seed = 92831;
     const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
@@ -2138,6 +2139,7 @@ function openSolarFlareLauncher() {
     const parallaxX = Math.sin(state.camera.x * .07) * width * .04;
     const parallaxY = Math.sin(state.camera.y * .07) * height * .035;
     const hasMilkyWayPhoto = milkyWayPhoto.complete && milkyWayPhoto.naturalWidth > 0;
+    if (state.galaxyLayer) ctx.drawImage(state.galaxyLayer, parallaxX, parallaxY);
     if (hasMilkyWayPhoto) {
       const viewRatio = width / height;
       // Zoom into the useful star field and leave the source map's printed border offscreen.
@@ -2148,7 +2150,7 @@ function openSolarFlareLauncher() {
       const sourceX = travelX * (.5 + Math.sin(state.camera.x * .025) * .08);
       const sourceY = travelY * (.46 + Math.sin(state.camera.y * .025) * .06);
       ctx.save();
-      ctx.globalAlpha = .18;
+      ctx.globalAlpha = .045;
       ctx.drawImage(milkyWayPhoto, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
       ctx.restore();
       const photoShade = ctx.createRadialGradient(width * .55, height * .42, 0, width * .55, height * .42, Math.max(width, height) * .78);
@@ -2705,13 +2707,16 @@ function drawMagnetosphere(body, radius) {
     }
 
     if (body.texture === "sun" || body.scienceType === "star") {
-      const glow = ctx.createRadialGradient(0, 0, radius * .3, 0, 0, radius * 3.2);
-      glow.addColorStop(0, rgbaColor(body.color, 0.55));
-      glow.addColorStop(.25, rgbaColor(body.color, 0.24));
-      glow.addColorStop(1, rgbaColor(body.color, 0));
-      ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(0, 0, radius * 3.2, 0, Math.PI * 2); ctx.fill();
+      SpaceVisuals.star(ctx, radius, body.color, body.id || 1);
       drawSolarProminences(body, radius);
+      if (state.selectedId === body.id) {
+        ctx.strokeStyle = 'rgba(190,220,255,.75)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(0,0,radius+8,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.restore();
+      if (state.showVelocity) drawVelocity(body, p);
+      return;
     }
     if (body.ring) drawRing(body, radius, true);
     const sphere = ctx.createRadialGradient(-radius * .33, -radius * .38, radius * .06, 0, 0, radius * 1.05);
@@ -2855,15 +2860,7 @@ function drawMagnetosphere(body, radius) {
     const star = stars.sort((a, b) => Math.hypot(a.x - body.x, a.y - body.y) - Math.hypot(b.x - body.x, b.y - body.y))[0];
     if (!star) return;
     const angle = Math.atan2(star.y - body.y, star.x - body.x);
-    const lx = Math.cos(angle) * radius;
-    const ly = Math.sin(angle) * radius;
-    const shade = ctx.createLinearGradient(lx, ly, -lx, -ly);
-    shade.addColorStop(0, "rgba(0,2,5,0)");
-    shade.addColorStop(.42, "rgba(0,2,5,.10)");
-    shade.addColorStop(.60, "rgba(0,2,5,.65)");
-    shade.addColorStop(1, "rgba(0,2,5,.94)");
-    ctx.fillStyle = shade;
-    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+    ctx.drawImage(SpaceVisuals.shadow(angle), -radius, -radius, radius * 2, radius * 2);
   }
 
   function drawNasaTexture(body, radius) {
@@ -3108,6 +3105,7 @@ function drawMagnetosphere(body, radius) {
         attempts += 1;
       }
       if (y > state.viewport.height - 18) y = p.y - radius - 14;
+      if (attempts > 2 && body.id !== state.selectedId && body.id !== state.hoveredId) continue;
       if (attempts > 0) {
         ctx.strokeStyle = "rgba(126,164,218,.22)";
         ctx.lineWidth = .7;
@@ -3287,7 +3285,7 @@ function drawMagnetosphere(body, radius) {
       grad.addColorStop(0.7, rgbaColor(p.color, 0.35));
       grad.addColorStop(1, "rgba(0, 0, 0, 0)");
 
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = alpha * .28;
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(screenPos.x, screenPos.y, p.size * 3.5, 0, Math.PI * 2);
@@ -3307,11 +3305,17 @@ function drawMagnetosphere(body, radius) {
     ctx.save();
     ctx.rotate(-.22);
     ctx.scale(1, .34);
-    ctx.strokeStyle = behind ? "rgba(175,157,123,.42)" : "rgba(232,215,177,.7)";
-    ctx.lineWidth = Math.max(2, radius * .18);
-    ctx.beginPath();
-    ctx.arc(0, 0, radius * 1.7 * (body.ringScale ?? 1), behind ? Math.PI : 0, behind ? Math.PI * 2 : Math.PI);
-    ctx.stroke();
+    const scale = body.ringScale ?? 1;
+    for (let band = 0; band < 32; band++) {
+      if (band === 22 || band === 23) continue; // Cassini-like gap.
+      const r = radius * (1.28 + band * .023) * scale;
+      const opacity = (behind ? .24 : .52) * (.6 + .4 * Math.sin(band * 1.7) ** 2);
+      ctx.strokeStyle = `rgba(218,207,182,${opacity})`;
+      ctx.lineWidth = Math.max(.35, radius * .025 * scale);
+      ctx.beginPath();
+      ctx.arc(0, 0, r, behind ? Math.PI : 0, behind ? Math.PI * 2 : Math.PI);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -3768,7 +3772,7 @@ function drawMagnetosphere(body, radius) {
     const height = Math.max(1, maxY - minY);
     const vpWidth = Math.max(300, state.viewport?.width || 1000);
     const vpHeight = Math.max(300, state.viewport?.height || 700);
-    state.camera.zoom = clamp(Math.min(vpWidth * .72 / width, vpHeight * .72 / height), 12, 2500);
+    state.camera.zoom = clamp(Math.min(vpWidth * .72 / width, vpHeight * .72 / height), .05, 2500);
     if (!silent) toast("Camera fitted to system");
   }
 
@@ -3790,7 +3794,7 @@ function drawMagnetosphere(body, radius) {
     const children = state.bodies.filter((candidate) => candidate.parentId === body.id);
     if (children.length) {
       const farthest = Math.max(...children.map((child) => Math.hypot(child.x - body.x, child.y - body.y)));
-      state.camera.zoom = clamp(Math.min(state.viewport.width, state.viewport.height) * .38 / Math.max(farthest, body.collisionRadius * 8), 90, 250000);
+      state.camera.zoom = clamp(Math.min(state.viewport.width, state.viewport.height) * .38 / Math.max(farthest, body.collisionRadius * 8), .05, 250000);
     } else {
       state.camera.zoom = clamp(Math.max(state.camera.zoom, 32 / body.collisionRadius), 90, 250000);
     }
@@ -5006,7 +5010,7 @@ function drawMagnetosphere(body, radius) {
   });
   window.addEventListener("load", () => {
     resizeCanvas();
-    if (state.preset === "solar") state.camera = { x: 0, y: 0, zoom: 28 };
+    if (state.preset === "solar") fitView(true);
   });
 
   requestAnimationFrame(frame);

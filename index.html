@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050914" />
     <title>Planets Sandbox</title>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=20260819_8" />
+    <link rel="stylesheet" href="styles.css?v=20260905" />
   </head>
   <body>
     <div class="app-shell">
@@ -69,7 +69,7 @@
             <div class="toggle-grid">
               <label><input id="showTrails" type="checkbox" checked /><span></span>Trails</label>
               <label><input id="showLabels" type="checkbox" checked /><span></span>Labels</label>
-              <label><input id="showGrid" type="checkbox" checked /><span></span>Grid</label>
+              <label><input id="showGrid" type="checkbox" /><span></span>Grid</label>
               <label><input id="showVelocity" type="checkbox" /><span></span>Velocity</label>
               <label><input id="showOrbits" type="checkbox" checked /><span></span>Orbits</label>
             </div>
@@ -254,7 +254,7 @@
         <div class="scale-indicator"><span id="scaleBar"></span><label id="scaleLabel">1 AU</label></div>
         <div class="mode-hint" id="modeHint" hidden>Choose an object and target from the New Planet menu · Esc to cancel</div>
         <div class="toast" id="toast" role="status"></div>
-        <div class="canvas-credit">Realism update · Sep 4 · NASA/JPL imagery · enhanced visual sizes · Scroll to zoom</div>
+        <div class="canvas-credit">Starlight update · Sep 5 · NASA/JPL imagery · Double-click a planet to follow</div>
 
         <aside class="evolution-hud" id="evolutionHud" hidden>
           <div class="evolution-header">
@@ -410,6 +410,7 @@
       </div>
     </dialog>
 
-    <script src="app.js?v=20260904_realism"></script>
+    <script src="space-visuals.js?v=20260905"></script>
+    <script src="app.js?v=20260905"></script>
   </body>
 </html>
