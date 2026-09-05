@@ -500,6 +500,20 @@ return {
     }
   }
 
+  function isDebrisOrMoon(body) {
+    if (!body) return false;
+    if (body.isMoon || body.parentId != null) return true;
+    const n = body.name || "";
+    return n.includes("Moon") || n.includes("Fragment") || n.includes("Core") ||
+      n.includes("Deimos") || n.includes("Phobos") || n.includes("Io") ||
+      n.includes("Europa") || n.includes("Ganymede") || n.includes("Callisto") ||
+      n.includes("Titan") || n.includes("Enceladus") || n.includes("Mimas") ||
+      n.includes("Tethys") || n.includes("Dione") || n.includes("Rhea") ||
+      n.includes("Iapetus") || n.includes("Miranda") || n.includes("Ariel") ||
+      n.includes("Umbriel") || n.includes("Titania") || n.includes("Oberon") ||
+      n.includes("Triton") || n.includes("Charon");
+  }
+
   function recenterSubsystem(bodies, anchor) {
     const totalMass = bodies.reduce((sum, body) => sum + body.mass, 0);
     const center = bodies.reduce((result, body) => ({
@@ -803,7 +817,7 @@ return {
       const sun = makeBody(planetData[0]);
       state.bodies = [sun];
       for (const planet of planetData.slice(1)) state.bodies.push(makeOrbiter(sun, { ...planet, distance: planet.x }));
-      addMajorMoons();
+      if (state.moonsEngaged) addMajorMoons();
       state.camera = { x: 0, y: 0, zoom: 20 };
       toast("Era 7: Present-Day Solar System");
 
@@ -870,7 +884,7 @@ return {
       const sun = makeBody(planetData[0]);
       state.bodies = [sun];
       for (const planet of planetData.slice(1)) state.bodies.push(makeOrbiter(sun, { ...planet, distance: planet.x }));
-      addMajorMoons();
+      if (state.moonsEngaged) addMajorMoons();
       recenterSubsystem(state.bodies, { x: 0, y: 0, vx: 0, vy: 0 });
       state.camera = { x: 0, y: 0, zoom: 17 };
     } else if (name === "earthMoon") {
@@ -959,6 +973,9 @@ return {
     }
     state.running = true;
     if (name === "solar") state.camera = { x: 0, y: 0, zoom: 28 };
+    if (!state.moonsEngaged) {
+      state.bodies = state.bodies.filter((body) => !isDebrisOrMoon(body));
+    }
     if (saveSnapshot) state.initialSnapshot = serializeBodies();
     updateInteractionHint();
     updateSelectionUI();
@@ -987,6 +1004,9 @@ return {
     ui.moveBodyMode.setAttribute("aria-pressed", "false");
     const wasRunning = state.running;
     state.bodies = state.initialSnapshot.map((body) => ({ ...body, trail: [] }));
+    if (!state.moonsEngaged) {
+      state.bodies = state.bodies.filter((body) => !isDebrisOrMoon(body));
+    }
     state.idCounter = Math.max(1, ...state.bodies.map((b) => b.id + 1));
     state.simYears = 0;
     state.selectedId = null;
@@ -1142,7 +1162,7 @@ function integrate(dt) {
     const combinedColRadius = Math.max(1e-6, a.collisionRadius + b.collisionRadius);
     const vEsc = Math.sqrt(2 * G * (a.mass + b.mass) / combinedColRadius);
     const availableSlots = MAX_BODIES - state.bodies.length;
-    const isHighSpeedFragmentation = (relSpeed >= vEsc * 1.35 || relativeSpeedKmS >= 12.0) && availableSlots >= 3 && primary.mass < impactor.mass * 80;
+    const isHighSpeedFragmentation = state.moonsEngaged && (relSpeed >= vEsc * 1.35 || relativeSpeedKmS >= 12.0) && availableSlots >= 3 && primary.mass < impactor.mass * 80;
 
     if (isHighSpeedFragmentation) {
       fragmentCollision(a, b, vEsc, availableSlots);
@@ -1171,6 +1191,12 @@ function integrate(dt) {
     const survivor = a.mass >= b.mass ? a : b;
     const destroyed = survivor === a ? b : a;
 
+    if (!state.moonsEngaged) {
+      // When Moons are OFF: merge directly into core instead of spawning debris fragments
+      spawnImpactEffect(a, b, comX, comY);
+      mergeBodies(survivor, destroyed, `HIGH-SPEED IMPACT: Merged into ${survivor.name}`);
+      return;
+    }
     const numFragments = Math.min(Math.floor(4 + Math.random() * 5), availableSlots);
     const coreFraction = 0.60 + Math.random() * 0.12;
     const coreMass = totalMass * coreFraction;
@@ -1471,7 +1497,7 @@ function integrate(dt) {
         const available = Math.min(7, MAX_BODIES - state.bodies.length + 1);
         primary.ring = true;
         primary.ringScale = clamp((primary.ringScale ?? 1) + .3 + vulnerable.mass / primary.mass * 1.5, 1, 4.5);
-        if (available < 3) {
+if (!state.moonsEngaged || available < 3) {
           spawnImpactEffect(primary, vulnerable, vulnerable.x, vulnerable.y);
           mergeBodies(primary, vulnerable, `${vulnerable.name} was absorbed into ${primary.name}'s rings`);
           return;
@@ -2449,94 +2475,148 @@ function drawOrbitGuides() {
     }
   }
 
-  function drawHabitableZones() {
-    // Only show Habitable Zone and Roche limit when the user has clicked "New Planet"
-    if (!state.addMode && !state.orbitPlacement) return;
+function drawHabitableZones() {
+    // ONLY display when the New Planet launcher is open or placing an orbit
+    const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && typeof ui.launchPanel.classList.contains === "function" && ui.launchPanel.classList.contains("open") && ui.launchPanel.getAttribute("aria-hidden") === "false");
+    if (!isLauncherOpen && !state.addMode && !state.orbitPlacement) return;
 
-    for (const body of state.bodies) {
-      const hz = getHabitableZone(body);
-      if (!hz) continue;
+    const stars = state.bodies.filter(b => b.texture === "sun" || b.scienceType === "star" || b.isBlackHole || b.mass * EARTHS_PER_SUN > 10000);
+    if (!stars.length) return;
 
-      const starScreen = worldToScreen(body.x, body.y);
-      const innerRadius = hz.innerAU * state.camera.zoom;
-      const outerRadius = hz.outerAU * state.camera.zoom;
+    // IN BINARY SYSTEMS: Only show the Habitable Zone and zones for the star the user chose/selected or targeted!
+    let chosenStar = null;
+    if (state.selectedId) {
+      chosenStar = stars.find(s => s.id === state.selectedId);
+    }
+    if (!chosenStar && state.launchTargetId) {
+      chosenStar = stars.find(s => s.id === state.launchTargetId);
+    }
+    if (!chosenStar) {
+      // Default to primary star (highest mass)
+      chosenStar = [...stars].sort((a, b) => b.mass - a.mass)[0];
+    }
+    if (!chosenStar) return;
 
-      // 1. Roche Limit Hazard Zone
-      const referenceMass = 1 / EARTHS_PER_SUN;
-      const rocheDist = rocheLimit(body, referenceMass, EARTH_RADIUS_AU);
-      const rocheRadius = Math.max(rocheDist * state.camera.zoom, visualRadius(body) * 2.2);
+    const hz = getHabitableZone(chosenStar);
+    if (!hz) return;
 
-      ctx.save();
-      // Roche Limit Disruption Disk Shading
-      const rocheGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, visualRadius(body), starScreen.x, starScreen.y, rocheRadius);
-      rocheGrad.addColorStop(0, "rgba(239, 68, 68, 0.16)");
-      rocheGrad.addColorStop(0.8, "rgba(239, 68, 68, 0.08)");
-      rocheGrad.addColorStop(1, "rgba(239, 68, 68, 0)");
-      ctx.fillStyle = rocheGrad;
+    const starScreen = worldToScreen(chosenStar.x, chosenStar.y);
+    const innerRadius = hz.innerAU * state.camera.zoom;
+    const outerRadius = hz.outerAU * state.camera.zoom;
+
+    // Roche Limit Hazard Distance
+    const referenceMass = 1 / EARTHS_PER_SUN;
+    const rocheDist = rocheLimit(chosenStar, referenceMass, EARTH_RADIUS_AU);
+    const rocheRadius = Math.max(rocheDist * state.camera.zoom, visualRadius(chosenStar) * 2.2);
+
+    ctx.save();
+
+    // 1. TIDAL SHREDDING ZONE (Inside Roche Limit): Completely Pitch Black Void
+    ctx.fillStyle = "#000000";
+    ctx.beginPath();
+    ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Roche Limit Warning Ring Boundary
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.95)";
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (rocheRadius > 25) {
+      ctx.setLineDash([]);
+      ctx.font = "700 9px Inter, sans-serif";
+      ctx.fillStyle = "rgba(252, 165, 165, 0.95)";
+      ctx.textAlign = "center";
+      ctx.fillText(`💥 TIDAL SHREDDING ZONE (${formatDistance(rocheDist)})`, starScreen.x, starScreen.y - rocheRadius - 6);
+    }
+
+    // 2. SCORCH ZONE (Between Roche Limit & Inner Habitable Edge): Red to Orange Gradient
+    if (innerRadius > rocheRadius) {
+      const scorchGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, rocheRadius, starScreen.x, starScreen.y, innerRadius);
+      scorchGrad.addColorStop(0, "rgba(220, 38, 38, 0.48)");   // incandescent fiery red
+      scorchGrad.addColorStop(0.55, "rgba(249, 115, 22, 0.35)"); // hot orange
+      scorchGrad.addColorStop(1, "rgba(245, 158, 11, 0.20)");   // amber scorch edge
+
+      ctx.fillStyle = scorchGrad;
       ctx.beginPath();
-      ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+      ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2);
+      ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2, true);
       ctx.fill();
 
-      // Roche Limit Warning Ring
-      ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.65)";
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([6, 5]);
       ctx.beginPath();
-      ctx.arc(starScreen.x, starScreen.y, rocheRadius, 0, Math.PI * 2);
+      ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2);
       ctx.stroke();
 
-      if (rocheRadius > 25) {
+      const midScorch = (rocheRadius + innerRadius) * 0.5;
+      if (innerRadius - rocheRadius > 22) {
         ctx.setLineDash([]);
         ctx.font = "700 9px Inter, sans-serif";
-        ctx.fillStyle = "rgba(252, 165, 165, 0.95)";
+        ctx.fillStyle = "rgba(251, 146, 60, 0.95)";
         ctx.textAlign = "center";
-        ctx.fillText(`💥 ROCHE LIMIT (${formatDistance(rocheDist)}) — TIDAL SHREDDING`, starScreen.x, starScreen.y - rocheRadius - 6);
+        ctx.fillText(`☀️ SCORCH ZONE (${formatDistance(rocheDist)} – ${formatDistance(hz.innerAU)})`, starScreen.x, starScreen.y - midScorch);
       }
-
-      // 2. Habitable Zone Annulus (Goldilocks Zone)
-      if (outerRadius > 10) {
-        const time = performance.now() * 0.0015;
-        const pulse = Math.sin(time * 2) * 0.03 + 0.97;
-
-        // Radial Annulus Gradient Fill
-        const bandGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, innerRadius, starScreen.x, starScreen.y, outerRadius);
-        bandGrad.addColorStop(0, "rgba(245, 158, 11, 0.18)");   // warm inner boundary
-        bandGrad.addColorStop(0.3, "rgba(52, 211, 153, 0.16)"); // lush emerald habitable center
-        bandGrad.addColorStop(0.7, "rgba(56, 189, 248, 0.14)"); // cyan-blue ocean zone
-        bandGrad.addColorStop(1, "rgba(96, 165, 250, 0.04)");   // outer cold boundary
-
-        ctx.fillStyle = bandGrad;
-        ctx.beginPath();
-        ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
-        ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2, true);
-        ctx.fill();
-
-        // Inner Edge (Runaway Greenhouse)
-        ctx.strokeStyle = "rgba(245, 158, 11, 0.55)";
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Outer Edge (Maximum Greenhouse)
-        ctx.strokeStyle = "rgba(96, 165, 250, 0.55)";
-        ctx.beginPath();
-        ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Central Habitable Zone Badge
-        const midRadius = (innerRadius + outerRadius) * 0.5;
-        if (outerRadius - innerRadius > 18) {
-          ctx.font = "700 9px Inter, sans-serif";
-          ctx.fillStyle = "rgba(110, 231, 183, 0.95)";
-          ctx.textAlign = "center";
-          ctx.fillText(`🌿 HABITABLE ZONE (${formatDistance(hz.innerAU)} – ${formatDistance(hz.outerAU)}) — Liquid Water & Life`, starScreen.x, starScreen.y - midRadius);
-        }
-      }
-      ctx.restore();
     }
+
+    // 3. HABITABLE ZONE (Between Inner & Outer Edge): Lush Emerald Green & Cyan
+    if (outerRadius > innerRadius && outerRadius > 10) {
+      const bandGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, innerRadius, starScreen.x, starScreen.y, outerRadius);
+      bandGrad.addColorStop(0, "rgba(16, 185, 129, 0.32)");   // lush emerald green
+      bandGrad.addColorStop(0.5, "rgba(52, 211, 153, 0.38)"); // glowing vibrant center
+      bandGrad.addColorStop(1, "rgba(56, 189, 248, 0.28)");   // cyan ocean edge
+
+      ctx.fillStyle = bandGrad;
+      ctx.beginPath();
+      ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
+      ctx.arc(starScreen.x, starScreen.y, innerRadius, 0, Math.PI * 2, true);
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.75)";
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const midHabitable = (innerRadius + outerRadius) * 0.5;
+      if (outerRadius - innerRadius > 18) {
+        ctx.setLineDash([]);
+        ctx.font = "700 9px Inter, sans-serif";
+        ctx.fillStyle = "rgba(110, 231, 183, 0.98)";
+        ctx.textAlign = "center";
+        const typeNote = hz.greenhouseFactor > 1.2 ? ` · ${chosenStar.name} (Super-Greenhouse)` : hz.greenhouseFactor < 0.85 ? ` · ${chosenStar.name} (Thin Atmo)` : ` · ${chosenStar.name}`;
+        ctx.fillText(`🌿 HABITABLE ZONE (${formatDistance(hz.innerAU)} – ${formatDistance(hz.outerAU)})${typeNote}`, starScreen.x, starScreen.y - midHabitable);
+      }
+    }
+
+    // 4. COLD ZONE (Beyond Outer Habitable Edge): Lighter to Darker Blue Fading Away
+    const coldOuterRadius = outerRadius * 2.6;
+    if (coldOuterRadius > outerRadius) {
+      const coldGrad = ctx.createRadialGradient(starScreen.x, starScreen.y, outerRadius, starScreen.x, starScreen.y, coldOuterRadius);
+      coldGrad.addColorStop(0, "rgba(147, 197, 253, 0.30)");  // lighter celestial ice-blue
+      coldGrad.addColorStop(0.35, "rgba(59, 130, 246, 0.20)"); // medium sapphire blue
+      coldGrad.addColorStop(0.7, "rgba(30, 58, 138, 0.12)");   // darker indigo/navy blue
+      coldGrad.addColorStop(1, "rgba(15, 23, 42, 0)");         // fades away into black space
+
+      ctx.fillStyle = coldGrad;
+      ctx.beginPath();
+      ctx.arc(starScreen.x, starScreen.y, coldOuterRadius, 0, Math.PI * 2);
+      ctx.arc(starScreen.x, starScreen.y, outerRadius, 0, Math.PI * 2, true);
+      ctx.fill();
+
+      const midCold = outerRadius + (coldOuterRadius - outerRadius) * 0.35;
+      ctx.font = "700 9px Inter, sans-serif";
+      ctx.fillStyle = "rgba(147, 197, 253, 0.85)";
+      ctx.textAlign = "center";
+      ctx.fillText(`❄️ COLD ZONE (${formatDistance(hz.outerAU)}+) — Freezing Glaciation`, starScreen.x, starScreen.y - midCold);
+    }
+
+    ctx.restore();
   }
 
   function drawRocheZones() {
@@ -4212,9 +4292,29 @@ const point = bodyDisplayPoint(body);
     toast(`Camera now following ${body.name}`);
   }
 
-  function currentSpawnSpec() {
+function currentSpawnSpec() {
     const type = document.querySelector('input[name="spawnType"]:checked')?.value || "asteroid";
-    let spec = type === "star" ? { ...spawnCatalog.star, ...starCatalog[ui.starType.value] } : spawnCatalog[type];
+    let spec = type === "star" ? { ...spawnCatalog.star, ...starCatalog[ui.starType.value] } : { ...spawnCatalog[type] };
+
+    // Apply dynamic custom planet studio settings
+    if (type === "customPlanet") {
+      const gasSelect = document.getElementById("launchCustomGas");
+      const pressureInput = document.getElementById("launchCustomPressure");
+      const waterInput = document.getElementById("launchCustomWater");
+      const atmoColorInput = document.getElementById("launchCustomAtmoColor");
+      const oceanColorInput = document.getElementById("launchCustomOceanColor");
+      const landColorInput = document.getElementById("launchCustomLandColor");
+
+      spec.gasType = gasSelect ? gasSelect.value : "earthAir";
+      spec.atmoPressure = pressureInput ? parseFloat(pressureInput.value) : 1.0;
+      spec.waterCoverage = waterInput ? parseFloat(waterInput.value) : 71;
+      spec.baselineWater = spec.waterCoverage;
+      spec.atmoColor = atmoColorInput ? atmoColorInput.value : "#60a5fa";
+      spec.oceanColor = oceanColorInput ? oceanColorInput.value : "#1d4ed8";
+      spec.landColor = landColorInput ? landColorInput.value : "#15803d";
+      spec.customAtmosphere = spec.gasType !== "none";
+    }
+
     const target = state.bodies.find((body) => body.id === state.launchTargetId);
     if (state.launchMode === "binary" && target) {
       const matchedMass = bodyGroupProperties(target.id).mass * EARTHS_PER_SUN;
@@ -4293,31 +4393,55 @@ const point = bodyDisplayPoint(body);
     return distance * Math.cbrt(gravitationalMass(body) / Math.max(3 * gravitationalMass(primary), 1e-15));
   }
 
-  function getHabitableZone(star) {
+function getHabitableZone(star, planetSpec = null) {
     if (!star) return null;
     const isStar = star.texture === "sun" || star.scienceType === "star" || star.mass * EARTHS_PER_SUN > 10000;
     if (!isStar && !star.isBlackHole && star.texture !== "blackHole") return null;
 
     // Star mass in Solar units (Sun = 1.0)
     const mSolar = Math.max(0.01, star.mass);
-    // Mass-luminosity relation: L ~ M^3.5 for main sequence stars
     const lum = (star.isBlackHole || star.texture === "blackHole") ? 0.005 : clamp(Math.pow(mSolar, 3.5), 0.005, 50000);
     const sqrtL = Math.sqrt(lum);
 
-    // Kasting & Kopparapu Habitable Zone boundaries (AU):
-    // Inner edge (Recent Venus / Runaway greenhouse): ~0.95 AU * sqrt(L)
-    // Outer edge (Maximum greenhouse / Early Mars): ~1.45 AU * sqrt(L)
-    const innerAU = 0.95 * sqrtL;
-    const outerAU = 1.45 * sqrtL;
-    const optInnerAU = 0.80 * sqrtL;
-    const optOuterAU = 1.68 * sqrtL;
+    // Determine target planet type from spec or active launcher radio
+    const activeRadio = document.querySelector('input[name="spawnType"]:checked');
+    const spawnType = planetSpec?.type || activeRadio?.value || "planet";
+
+    // Dynamic Greenhouse & Atmosphere Factor
+    let greenhouseFactor = 1.0;
+    if (spawnType === "hotPlanet") {
+      // Hot planet: intense volcanic heating / super-greenhouse atmosphere.
+      // Must be MUCH farther away from the star to reach temperate liquid water!
+      greenhouseFactor = 1.75;
+    } else if (spawnType === "asteroid") {
+      // Airless rocky body: no atmosphere to trap heat, must be closer to star
+      greenhouseFactor = 0.72;
+    } else if (spawnType === "gasGiant") {
+      greenhouseFactor = 1.95;
+    } else if (spawnType === "customPlanet") {
+      // Read dynamic atmosphere settings directly from Custom Planet Studio or spec
+      const gas = planetSpec?.gasType || document.getElementById("launchCustomGas")?.value || "earthAir";
+      const pressureVal = document.getElementById("launchCustomPressure")?.value;
+      const pressure = planetSpec?.atmoPressure ?? (pressureVal ? parseFloat(pressureVal) : 1.0);
+      
+      const gasMultiplier = gas === "carbonDioxide" ? 2.4 : gas === "methane" ? 1.8 : gas === "ammonia" ? 1.9 : gas === "none" ? 0.65 : 1.0;
+      const pressureMultiplier = Math.pow(Math.max(0.01, pressure), 0.22);
+      greenhouseFactor = clamp(gasMultiplier * pressureMultiplier, 0.55, 3.2);
+    }
+
+    const baseInner = 0.95 * sqrtL;
+    const baseOuter = 1.45 * sqrtL;
+    const innerAU = baseInner * greenhouseFactor;
+    const outerAU = baseOuter * greenhouseFactor;
 
     return {
       innerAU,
       outerAU,
-      optInnerAU,
-      optOuterAU,
+      optInnerAU: innerAU * 0.85,
+      optOuterAU: outerAU * 1.25,
       luminosity: lum,
+      greenhouseFactor,
+      planetType: spawnType
     };
   }
 
@@ -4587,9 +4711,10 @@ const point = bodyDisplayPoint(body);
     updateInteractionHint();
   }
 
-  function openLauncher() {
+function openLauncher() {
     if (state.orbitPlacement) cancelOrbitPlacement();
     toggleMoveMode(false);
+    toggleAddMode(true);
     ui.controlPanel.classList.remove("open");
     ui.mobilePanelButton.setAttribute("aria-label", "Open settings");
     state.launchTargetId = selectedBody()?.id || null;
@@ -4601,6 +4726,7 @@ const point = bodyDisplayPoint(body);
   }
 
   function closeLauncher() {
+    toggleAddMode(false);
     ui.launchPanel.classList.remove("open");
     ui.launchPanel.setAttribute("aria-hidden", "true");
     ui.launchPanel.inert = true;
@@ -4720,7 +4846,7 @@ const point = bodyDisplayPoint(body);
     if (enabled) toast("Move Bodies enabled — drag any body");
   }
 
-  function toggleMoons(engage = !state.moonsEngaged) {
+function toggleMoons(engage = !state.moonsEngaged) {
     state.moonsEngaged = engage;
     if (ui.toggleMoonsBtn) {
       ui.toggleMoonsBtn.classList.toggle("active", engage);
@@ -4728,18 +4854,22 @@ const point = bodyDisplayPoint(body);
       ui.toggleMoonsBtn.setAttribute("aria-pressed", String(engage));
     }
     if (!engage) {
-      state.bodies = state.bodies.filter((body) => !body.isMoon);
-      if (selectedBody()?.isMoon) state.selectedId = null;
+      // When Moons are OFF: completely purge ALL moons, cores, fragments, and satellite debris!
+      state.bodies = state.bodies.filter((body) => !isDebrisOrMoon(body));
+      if (selectedBody() && isDebrisOrMoon(selectedBody())) state.selectedId = null;
       refreshOrbitalRelationships();
       updateSelectionUI();
       renderSystemRoster();
-      toast("Moons disengaged — Maximum fast-forward speed active!", 4000);
+      toast("🌑 Moons OFF — All moons and debris fragments purged. Clean maximum time warp active!", 4000);
     } else {
-      addMajorMoons();
+      // When Moons are ON: cleanly spawn natural solar system satellites
+      if (state.preset === "solar" || state.preset === "earthMoon") {
+        if (state.moonsEngaged) addMajorMoons();
+      }
       refreshOrbitalRelationships();
       updateSelectionUI();
       renderSystemRoster();
-      toast("Moons engaged — 21 major moons spawned across solar system!", 4000);
+      toast("🌙 Moons ON — Natural satellite orbits engaged!", 4000);
     }
   }
 
@@ -4853,6 +4983,33 @@ const point = bodyDisplayPoint(body);
   }
 
   function bindEvents() {
+    // Custom Planet Studio & Gas Giant Ring Options in Launcher
+    const customStudio = document.getElementById("customPlanetLauncherStudio");
+    const ringOption = document.getElementById("gasGiantRingOption");
+    const launchPressure = document.getElementById("launchCustomPressure");
+    const launchPressureVal = document.getElementById("launchCustomPressureVal");
+    const launchWater = document.getElementById("launchCustomWater");
+    const launchWaterVal = document.getElementById("launchCustomWaterVal");
+    const launchGas = document.getElementById("launchCustomGas");
+
+    if (launchPressure && launchPressureVal) {
+      launchPressure.addEventListener("input", () => {
+        launchPressureVal.textContent = `${parseFloat(launchPressure.value).toFixed(1)} atm`;
+      });
+    }
+
+    if (launchWater && launchWaterVal) {
+      launchWater.addEventListener("input", () => {
+        launchWaterVal.textContent = `${launchWater.value}%`;
+      });
+    }
+
+    document.querySelectorAll('input[name="spawnType"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        if (customStudio) customStudio.style.display = radio.value === "customPlanet" ? "block" : "none";
+        if (ringOption) ringOption.style.display = (radio.value === "gasGiant" || radio.value === "customPlanet") ? "block" : "none";
+      });
+    });
     // Customizer Rings Tab & Controls
     const tabRingsBtn = document.getElementById("tabRingsBtn");
     const panelRings = document.getElementById("panelRings");
@@ -5501,6 +5658,6 @@ const point = bodyDisplayPoint(body);
     if (state.preset === "solar") fitView(true);
   });
 
-  window.__sandbox = { state, updateSimulation, integrate };
+  window.__sandbox = { state, updateSimulation, integrate, getHabitableZone, toggleMoons, loadPreset, drawHabitableZones };
   requestAnimationFrame(frame);
 })();
