@@ -1014,7 +1014,7 @@ return {
   }
 
   function buildStars() {
-    state.galaxyLayer = SpaceVisuals.galaxy(state.viewport.width, state.viewport.height);
+    state.galaxyLayer = (typeof SpaceVisuals !== "undefined" && SpaceVisuals.galaxy) ? SpaceVisuals.galaxy(state.viewport.width, state.viewport.height) : null;
     const count = Math.floor((state.viewport.width * state.viewport.height) / 5200);
     let seed = 92831;
     const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
@@ -2044,7 +2044,7 @@ function openSolarFlareLauncher() {
     SoundEngine.playSolarFlare();
   }
 
-  function closestEncounterStep() {
+function closestEncounterStep() {
     let safestStep = Infinity;
     for (let i = 0; i < state.bodies.length; i++) {
       for (let j = i + 1; j < state.bodies.length; j++) {
@@ -2052,25 +2052,24 @@ function openSolarFlareLauncher() {
         const b = state.bodies[j];
         const effectiveMass = pairGravityMass(a, b);
         if (effectiveMass <= 0) continue;
-        const distance = Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-9);
+        const minDistance = Math.max((a.collisionRadius + b.collisionRadius) * 0.85, 0.001);
+        const distance = Math.max(Math.hypot(b.x - a.x, b.y - a.y), minDistance);
         const dynamicalTime = Math.sqrt(distance ** 3 / (G * effectiveMass));
-        safestStep = Math.min(safestStep, dynamicalTime / 24);
+        safestStep = Math.min(safestStep, dynamicalTime / 20);
       }
     }
-    return safestStep;
+    return Math.max(0.0003 * DAY_TO_YEAR, safestStep);
   }
 
   function updateSimulation(realSeconds, wallSeconds = realSeconds) {
     if (!state.running || state.speedDays <= 0 || !state.bodies.length) return;
     const requestedDt = realSeconds * state.speedDays * DAY_TO_YEAR;
 
-
     const shortestPeriod = state.bodies.reduce((shortest, body) => {
       if (!body.orbit) return shortest;
       const parent = state.bodies.find((candidate) => candidate.id === body.orbit.parentId);
       if (!parent || !body.orbit.a) return shortest;
       const period = Math.sqrt(body.orbit.a ** 3 / Math.max(pairGravityMass(parent, body), 1e-15));
-      // Clamp moon minimum step to prevent excessive slowdown while ensuring stability
       const effectivePeriod = body.isMoon ? Math.max(period, 0.005) : period;
       return Math.min(shortest, effectivePeriod);
     }, Infinity);
@@ -2087,17 +2086,20 @@ function openSolarFlareLauncher() {
     }, Infinity);
 
     const encounterStep = closestEncounterStep();
-    const closeScale = minStarDist < 0.6 ? Math.max(0.12, minStarDist / 0.6) : 1.0;
-    const accuracyStep = Math.min(
-      .25 * DAY_TO_YEAR * closeScale,
-      Number.isFinite(shortestPeriod) ? (shortestPeriod / 75) * closeScale : Infinity,
-      Number.isFinite(encounterStep) ? encounterStep : Infinity,
+    const closeScale = minStarDist < 0.6 ? Math.max(0.2, minStarDist / 0.6) : 1.0;
+    const accuracyStep = Math.max(
+      0.00025 * DAY_TO_YEAR,
+      Math.min(
+        0.25 * DAY_TO_YEAR * closeScale,
+        Number.isFinite(shortestPeriod) ? (shortestPeriod / 60) * closeScale : Infinity,
+        Number.isFinite(encounterStep) ? encounterStep : Infinity
+      )
     );
 
-    const maxSteps = state.speedDays >= 300 ? 60 : state.speedDays >= 100 ? 45 : state.speedDays >= 30 ? 30 : 50;
+    const maxSteps = state.speedDays >= 300 ? 70 : state.speedDays >= 100 ? 50 : state.speedDays >= 30 ? 35 : 20;
     const steps = Math.min(maxSteps, Math.max(1, Math.ceil(requestedDt / accuracyStep)));
-    const dt = Math.min(requestedDt / steps, accuracyStep);
-    const advancedDt = dt * steps;
+    const dt = requestedDt / steps; // Ensures requestedDt is fully advanced and time never freezes!
+
     const detailedTrails = state.trailLength > 0 && state.speedDays >= 50;
     const sampleEvery = Math.max(1, Math.floor(steps / 6));
 
@@ -2106,8 +2108,8 @@ function openSolarFlareLauncher() {
       if (detailedTrails && ((i + 1) % sampleEvery === 0 || i === steps - 1)) recordTrailSnapshot();
     }
 
-    state.simYears += advancedDt;
-    const achievedSpeed = advancedDt / DAY_TO_YEAR / Math.max(wallSeconds, .001);
+    state.simYears += requestedDt;
+    const achievedSpeed = requestedDt / DAY_TO_YEAR / Math.max(wallSeconds, .001);
     state.effectiveSpeedDays += (achievedSpeed - state.effectiveSpeedDays) * .25;
     
     state.relationshipTick += 1;
@@ -2798,7 +2800,16 @@ function drawMagnetosphere(body, radius) {
     }
 
     if (body.texture === "sun" || body.scienceType === "star") {
-      SpaceVisuals.star(ctx, radius, body.color, body.id || 1);
+      if (typeof SpaceVisuals !== "undefined" && SpaceVisuals.star) {
+        SpaceVisuals.star(ctx, radius, body.color, body.id || 1);
+      } else {
+        const glow = ctx.createRadialGradient(0, 0, radius * .3, 0, 0, radius * 3.2);
+        glow.addColorStop(0, rgbaColor(body.color, 0.55));
+        glow.addColorStop(.25, rgbaColor(body.color, 0.24));
+        glow.addColorStop(1, rgbaColor(body.color, 0));
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(0, 0, radius * 3.2, 0, Math.PI * 2); ctx.fill();
+      }
       drawSolarProminences(body, radius);
       if (state.selectedId === body.id) {
         ctx.strokeStyle = 'rgba(190,220,255,.75)';
@@ -2951,7 +2962,9 @@ function drawMagnetosphere(body, radius) {
     const star = stars.sort((a, b) => Math.hypot(a.x - body.x, a.y - body.y) - Math.hypot(b.x - body.x, b.y - body.y))[0];
     if (!star) return;
     const angle = Math.atan2(star.y - body.y, star.x - body.x);
-    ctx.drawImage(SpaceVisuals.shadow(angle), -radius, -radius, radius * 2, radius * 2);
+    if (typeof SpaceVisuals !== "undefined" && SpaceVisuals.shadow) {
+      ctx.drawImage(SpaceVisuals.shadow(angle), -radius, -radius, radius * 2, radius * 2);
+    }
   }
 
   function drawNasaTexture(body, radius) {
@@ -3697,24 +3710,51 @@ function drawLaunchPreview() {
     if (ui.triggerSupernovaBtn) ui.triggerSupernovaBtn.style.display = isStarOrGiant ? "flex" : "none";
     if (ui.generateRingsBtn) ui.generateRingsBtn.style.display = isPlanetOrGiant ? "flex" : "none";
 
-    const point = bodyDisplayPoint(body);
+const point = bodyDisplayPoint(body);
     const radius = visualRadius(body);
     const parent = body.parentId ? state.bodies.find((candidate) => candidate.id === body.parentId) : null;
+    const dominantStar = state.bodies.find(b => (b.texture === "sun" || b.scienceType === "star") && b.id !== body.id);
+    let statusText = "DRAGGING BODY";
+    let statusColor = "#6bc5ff";
+
+    if (dominantStar) {
+      const dist = Math.hypot(body.x - dominantStar.x, body.y - dominantStar.y);
+      const roche = rocheLimit(dominantStar, body.mass, body.collisionRadius);
+      const hz = getHabitableZone(dominantStar);
+      const lum = hz ? hz.luminosity : 1;
+      const tempK = Math.round(278 * Math.pow(lum, 0.25) / Math.sqrt(Math.max(dist, 0.005)));
+      const tempC = tempK - 273;
+
+      if (dist <= roche) {
+        statusText = `💥 ROCHE LIMIT: Entering tidal shredding zone! (${formatDistance(dist)})`;
+        statusColor = "#ef4444";
+      } else if (hz && dist < hz.innerAU) {
+        statusText = `☀️ TORRID SCORCHED: ${tempC}°C — Too close to star!`;
+        statusColor = "#f97316";
+      } else if (hz && dist >= hz.innerAU && dist <= hz.outerAU) {
+        statusText = `🌿 HABITABLE ZONE: ${tempC}°C — Life-sustaining orbit!`;
+        statusColor = "#10b981";
+      } else {
+        statusText = `❄️ FROZEN ZONE: ${tempC}°C`;
+        statusColor = "#93c5fd";
+      }
+    }
+
     ctx.save();
-    ctx.strokeStyle = "rgba(107,197,255,.9)";
-    ctx.fillStyle = "rgba(181,225,255,.95)";
-    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = statusColor;
+    ctx.fillStyle = statusColor;
+    ctx.lineWidth = 1.4;
     ctx.setLineDash([6, 5]);
-    ctx.beginPath(); ctx.arc(point.x, point.y, radius + 13, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(point.x, point.y, radius + 14, 0, Math.PI * 2); ctx.stroke();
     if (parent && !state.grabbedGroupIds.includes(parent.id)) {
       const parentPoint = worldToScreen(parent.x, parent.y);
       ctx.strokeStyle = "rgba(113,169,237,.42)";
       ctx.beginPath(); ctx.moveTo(parentPoint.x, parentPoint.y); ctx.lineTo(point.x, point.y); ctx.stroke();
     }
     ctx.setLineDash([]);
-    ctx.font = "600 10px Inter, sans-serif";
+    ctx.font = "700 10px Inter, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("VELOCITY PRESERVED", point.x, point.y - radius - 22);
+    ctx.fillText(statusText, point.x, point.y - radius - 18);
     ctx.restore();
   }
 
@@ -5219,5 +5259,6 @@ function drawLaunchPreview() {
     if (state.preset === "solar") fitView(true);
   });
 
+  window.__sandbox = { state, updateSimulation, integrate };
   requestAnimationFrame(frame);
 })();

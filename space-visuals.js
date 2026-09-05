@@ -1,5 +1,5 @@
-/* Cached visual layers: expensive texture work is performed only once. */
-window.SpaceVisuals = (() => {
+var SpaceVisuals = (typeof window !== "undefined" ? (window.SpaceVisuals = {}) : {});
+SpaceVisuals = window.SpaceVisuals = (() => {
   const shadows = new Map();
   function shadow(angle) {
     const key = Math.round(angle * 36 / Math.PI);
