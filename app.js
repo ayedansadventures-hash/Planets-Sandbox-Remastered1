@@ -1065,7 +1065,7 @@ return {
       x: random() * state.viewport.width,
       y: random() * state.viewport.height,
       radius: random() * 1.25 + .2,
-      alpha: random() * .55 + .18,
+      alpha: random() * .58 + .28,
       blue: random() > .74,
     }));
     const bandCount = Math.min(620, Math.max(220, Math.floor((state.viewport.width * state.viewport.height) / 2500)));
@@ -2311,9 +2311,11 @@ function closestEncounterStep() {
   function drawBackground() {
     const { width, height } = state.viewport;
     const gradient = ctx.createRadialGradient(width * .58, height * .45, 0, width * .58, height * .45, Math.max(width, height) * .8);
-    gradient.addColorStop(0, "#05080d");
-    gradient.addColorStop(.45, "#020408");
-    gradient.addColorStop(1, "#000103");
+    // Keep the deep-space mood, but preserve enough lift that bodies, orbit
+    // guides, and the asteroid belt remain readable on smaller displays.
+    gradient.addColorStop(0, "#0a1424");
+    gradient.addColorStop(.45, "#040a15");
+    gradient.addColorStop(1, "#01030a");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
     const parallaxX = Math.sin(state.camera.x * .07) * width * .04;
@@ -2330,13 +2332,13 @@ function closestEncounterStep() {
       const sourceX = travelX * (.5 + Math.sin(state.camera.x * .025) * .08);
       const sourceY = travelY * (.46 + Math.sin(state.camera.y * .025) * .06);
       ctx.save();
-      ctx.globalAlpha = .045;
+      ctx.globalAlpha = .075;
       ctx.drawImage(milkyWayPhoto, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
       ctx.restore();
       const photoShade = ctx.createRadialGradient(width * .55, height * .42, 0, width * .55, height * .42, Math.max(width, height) * .78);
       photoShade.addColorStop(0, "rgba(3,10,24,.1)");
-      photoShade.addColorStop(.55, "rgba(1,5,14,.36)");
-      photoShade.addColorStop(1, "rgba(0,2,8,.82)");
+      photoShade.addColorStop(.55, "rgba(1,5,14,.24)");
+      photoShade.addColorStop(1, "rgba(0,2,8,.66)");
       ctx.fillStyle = photoShade;
       ctx.fillRect(0, 0, width, height);
     } else {
@@ -2441,6 +2443,19 @@ function drawAsteroidBelt() {
     const elapsed = performance.now() * .001;
     ctx.save();
     ctx.globalCompositeOperation = "screen";
+    // A restrained guide ellipse keeps the belt legible when particles are
+    // sub-pixel at a distant zoom level.
+    const beltCenter = worldToScreen(star.x, star.y);
+    const beltRadius = 2.72 * state.camera.zoom;
+    if (beltRadius > 24) {
+      ctx.strokeStyle = "rgba(188, 164, 126, .18)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 8]);
+      ctx.beginPath();
+      ctx.ellipse(beltCenter.x, beltCenter.y, beltRadius, beltRadius * .62, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     for (const asteroid of asteroidBeltParticles) {
       const angle = asteroid.angle + elapsed * asteroid.speed;
       const worldX = star.x + Math.cos(angle) * asteroid.distance;
@@ -2448,8 +2463,8 @@ function drawAsteroidBelt() {
       const point = worldToScreen(worldX, worldY);
       if (point.x < -5 || point.x > state.viewport.width + 5 || point.y < -5 || point.y > state.viewport.height + 5) continue;
       ctx.fillStyle = asteroid.color;
-      ctx.globalAlpha = asteroid.alpha;
-      ctx.beginPath(); ctx.arc(point.x, point.y, Math.max(.45, asteroid.size * state.camera.zoom * .018), 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = Math.min(.95, asteroid.alpha + .12);
+      ctx.beginPath(); ctx.arc(point.x, point.y, Math.max(.6, asteroid.size * state.camera.zoom * .026), 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }
@@ -2491,8 +2506,8 @@ function drawOrbitGuides() {
       const center = worldToScreen(parent.x - Math.cos(angle) * a * e, parent.y - Math.sin(angle) * a * e);
 
       ctx.save();
-      ctx.strokeStyle = body === selectedBody() ? "rgba(147, 197, 253, 0.85)" : "rgba(104, 155, 224, 0.28)";
-      ctx.lineWidth = body === selectedBody() ? 1.4 : 0.8;
+      ctx.strokeStyle = body === selectedBody() ? "rgba(147, 197, 253, 0.95)" : "rgba(104, 155, 224, 0.42)";
+      ctx.lineWidth = body === selectedBody() ? 1.6 : 1;
       ctx.setLineDash(body === selectedBody() ? [5, 4] : []);
       ctx.beginPath();
       ctx.ellipse(center.x, center.y, a * state.camera.zoom, b * state.camera.zoom, angle, 0, Math.PI * 2);
@@ -2794,9 +2809,9 @@ function drawHabitableZones() {
         }
         ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
       }
-      ctx.globalAlpha = .48;
+      ctx.globalAlpha = .62;
       ctx.strokeStyle = body.color;
-      ctx.lineWidth = 1.35;
+      ctx.lineWidth = 1.65;
       ctx.stroke();
     }
     ctx.restore();
