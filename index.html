@@ -127,6 +127,7 @@
                   <button type="button" class="tab-btn active" id="tabBandsBtn">🪐 Bands</button>
                   <button type="button" class="tab-btn" id="tabWaterBtn">🌊 Water &amp; Ice</button>
                   <button type="button" class="tab-btn" id="tabAtmoBtn">🧪 Atmosphere</button>
+                  <button type="button" class="tab-btn" id="tabRingsBtn">💍 Rings</button>
                 </div>
 
                 <!-- BANDS TAB -->
@@ -203,7 +204,20 @@
                       <input id="atmoHaze" type="range" min="0" max="100" value="60" />
                     </div>
                   </div>
+                                <!-- RINGS TAB -->
+                <div class="customizer-panel" id="panelRings" style="display: none;">
+                  <div class="toggle-grid" style="margin-bottom: 12px;">
+                    <label><input id="bodyHasRing" type="checkbox" checked /><span></span>Enable Planetary Rings</label>
+                  </div>
+                  <div class="range-field">
+                    <div class="range-label"><label for="bodyRingScale">Ring Width / Extent</label><output id="bodyRingScaleValue">1.0×</output></div>
+                    <input id="bodyRingScale" type="range" min="0.8" max="3.8" step="0.1" value="1.0" />
+                  </div>
+                  <div class="field-row">
+                    <label class="stacked-field color-field">Ring Tone<input id="bodyRingColor" type="color" value="#d7bd7d" /></label>
+                  </div>
                 </div>
+              </div>
               </div>
 
               <div class="science-card">
@@ -215,6 +229,7 @@
                   <div><small>COMPOSITION</small><strong id="bodyComposition">Silicate rock, iron</strong></div>
                   <div><small>ATMOSPHERE</small><strong id="bodyAtmosphere">Trace gases</strong></div>
                   <div><small>TEMPERATURE</small><strong id="bodyTemperature">15 °C</strong></div>
+                  <div><small>HABITABILITY</small><strong id="bodyHabitability">98% (Prime Habitable)</strong></div>
                   <div><small>RADIUM / RADIATION</small><strong id="bodyRadium">0.12 mSv/yr</strong></div>
                   <div><small>DENSITY</small><strong id="bodyDensity">5.5 g/cm³</strong></div>
                   <div><small>RADIUS</small><strong id="bodyRadius">6,371 km</strong></div>
@@ -311,21 +326,92 @@
             <div><p class="eyebrow">OBJECT CREATOR</p><h2>New Planet</h2></div>
             <button id="closeLauncher" class="icon-button" aria-label="Close new planet menu">×</button>
           </div>
-          <p class="launch-intro">Choose an object, select the X target slot, then launch an impactor, place an orbit, or create a binary pair.</p>
+          <p class="launch-intro">Choose an object, tune the orbit or atmosphere, then move your cursor and click to spawn!</p>
           <div class="launch-mode" role="group" aria-label="Launch behavior">
-            <button id="autoOrbitMode" class="active" aria-pressed="true"><span>✦</span> Auto-Orbit</button>
+            <button id="orbitMode" class="active" aria-pressed="true"><span>◉</span> Orbit</button>
             <button id="impactMode" aria-pressed="false"><span>➤</span> Impact</button>
-            <button id="orbitMode" aria-pressed="false"><span>◉</span> Target</button>
-            <button id="binaryMode" aria-pressed="false"><span>∞</span> Binary</button>
+            <!-- Hidden backward-compatibility aliases -->
+            <button id="autoOrbitMode" style="display: none;" aria-hidden="true"></button>
+            <button id="binaryMode" style="display: none;" aria-hidden="true"></button>
           </div>
           <div class="spawn-types" id="spawnTypes">
             <label class="spawn-card"><input type="radio" name="spawnType" value="asteroid" checked /><span class="spawn-orb asteroid-orb"></span><strong>Asteroid</strong><small>Small, rocky, fast</small></label>
-            <label class="spawn-card"><input type="radio" name="spawnType" value="gasGiant" /><span class="spawn-orb gas-orb"></span><strong>Gas giant</strong><small>Massive, hydrogen-rich</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="gasGiant" /><span class="spawn-orb gas-orb"></span><strong>Gas giant</strong><small>Massive, procedural</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="planet" /><span class="spawn-orb earth-orb"></span><strong>Normal planet</strong><small>Rocky, Earth-like</small></label>
-            <label class="spawn-card"><input type="radio" name="spawnType" value="hotPlanet" /><span class="spawn-orb hot-orb"></span><strong>Hot planet</strong><small>Molten, high energy</small></label>
-            <label class="spawn-card"><input type="radio" name="spawnType" value="star" /><span class="spawn-orb star-orb"></span><strong>Sun or star</strong><small>Choose a stellar class</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="hotPlanet" /><span class="spawn-orb hot-orb"></span><strong>Hot planet</strong><small>Super-greenhouse</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="customPlanet" /><span class="spawn-orb custom-orb"></span><strong>Custom Planet</strong><small>Design surface &amp; atmo</small></label>
+            <label class="spawn-card"><input type="radio" name="spawnType" value="star" /><span class="spawn-orb star-orb"></span><strong>Sun or star</strong><small>Choose stellar class</small></label>
             <label class="spawn-card"><input type="radio" name="spawnType" value="blackHole" /><span class="spawn-orb blackhole-orb"></span><strong>Black Hole</strong><small>Singularity &amp; disk</small></label>
           </div>
+
+          <!-- GAS GIANT RING TOGGLE -->
+          <div id="gasGiantRingOption" style="margin-top: 10px; padding: 10px 14px; background: rgba(14, 25, 44, 0.75); border: 1px solid rgba(132, 169, 224, 0.2); border-radius: 8px; display: none;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; cursor: pointer; font-weight: 600;">
+              <input id="spawnRings" type="checkbox" checked /> <span></span> Include Planetary Ring System
+            </label>
+          </div>
+
+          <!-- CUSTOM PLANET DESIGN STUDIO IN LAUNCHER -->
+          <div id="customPlanetLauncherStudio" style="margin-top: 12px; padding: 14px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <strong style="color: #c084fc; font-size: 12px; font-weight: 700; letter-spacing: 0.05em;">🎨 CUSTOM PLANET STUDIO</strong>
+              <small style="color: #94a3b8; font-size: 10px;">Atmosphere &amp; Climate</small>
+            </div>
+
+            <label class="stacked-field" style="font-size: 11px; margin-bottom: 8px;">
+              Atmospheric Composition
+              <select id="launchCustomGas">
+                <option value="earthAir">Nitrogen-Oxygen (Earth · 1.0× HZ)</option>
+                <option value="carbonDioxide">Dense CO2 (Venus · 2.4× HZ Farther)</option>
+                <option value="methane">Methane (Titan · 1.8× HZ)</option>
+                <option value="hydrogenHelium">Hydrogen-Helium (Gas Giant · 1.2× HZ)</option>
+                <option value="ammonia">Ammonia (Exotic · 1.9× HZ)</option>
+                <option value="none">Airless Vacuum (Mercury · 0.65× HZ Closer)</option>
+                <option value="customMix">Custom Chemical Gas Mix</option>
+              </select>
+            </label>
+
+            <!-- CUSTOM GAS MIX SLIDERS -->
+            <div id="customGasBreakdown" style="display: none; background: rgba(30, 41, 59, 0.6); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; border: 1px solid rgba(168, 85, 247, 0.2);">
+              <div class="range-field" style="margin: 4px 0;">
+                <div class="range-label" style="font-size: 10px;"><span>Nitrogen (N₂)</span><output id="customGasN2Val">78%</output></div>
+                <input id="customGasN2" type="range" min="0" max="100" value="78" />
+              </div>
+              <div class="range-field" style="margin: 4px 0;">
+                <div class="range-label" style="font-size: 10px;"><span>Oxygen (O₂)</span><output id="customGasO2Val">21%</output></div>
+                <input id="customGasO2" type="range" min="0" max="100" value="21" />
+              </div>
+              <div class="range-field" style="margin: 4px 0;">
+                <div class="range-label" style="font-size: 10px;"><span>Carbon Dioxide (CO₂)</span><output id="customGasCO2Val">1%</output></div>
+                <input id="customGasCO2" type="range" min="0" max="100" value="1" />
+              </div>
+              <div class="range-field" style="margin: 4px 0;">
+                <div class="range-label" style="font-size: 10px;"><span>Methane (CH₄)</span><output id="customGasCH4Val">0%</output></div>
+                <input id="customGasCH4" type="range" min="0" max="100" value="0" />
+              </div>
+            </div>
+
+            <div class="range-field" style="margin: 6px 0;">
+              <div class="range-label" style="font-size: 11px;"><label for="launchCustomPressure">Atmosphere Pressure <small>0.01 – 30 atm</small></label><output id="launchCustomPressureVal">1.0 atm</output></div>
+              <input id="launchCustomPressure" type="range" min="0.01" max="30" step="0.1" value="1.0" />
+            </div>
+
+            <div class="range-field" style="margin: 6px 0;">
+              <div class="range-label" style="font-size: 11px;"><label for="launchCustomWater">Surface Ocean Water</label><output id="launchCustomWaterVal">71%</output></div>
+              <input id="launchCustomWater" type="range" min="0" max="100" value="71" />
+            </div>
+
+            <div class="field-row" style="margin-top: 8px;">
+              <label class="stacked-field color-field" style="font-size: 10px;">Atmosphere Halo<input id="launchCustomAtmoColor" type="color" value="#60a5fa" /></label>
+              <label class="stacked-field color-field" style="font-size: 10px;">Ocean Tone<input id="launchCustomOceanColor" type="color" value="#1d4ed8" /></label>
+              <label class="stacked-field color-field" style="font-size: 10px;">Land Tone<input id="launchCustomLandColor" type="color" value="#15803d" /></label>
+            </div>
+
+            <p style="font-size: 10px; color: #a855f7; margin-top: 8px; line-height: 1.4;">
+              💡 <em>Changing the atmosphere will automatically adjust the Habitable Zone rings on screen!</em>
+            </p>
+          </div>
+
           <label class="stacked-field star-type-field" id="starTypeField" hidden>Star type
             <select id="starType">
               <option value="gStar">G-type · Sun-like</option>
@@ -335,19 +421,59 @@
               <option value="whiteDwarf">White dwarf</option>
             </select>
           </label>
-          <div class="target-heading"><div><small>X TARGET SLOT</small><strong>Orbit or impact this object</strong></div><span id="rosterCount">0 bodies</span></div>
-          <div class="system-roster" id="systemRoster"></div>
-          <div class="launch-options" id="impactOptions">
+
+          <!-- ORBIT & ECCENTRICITY CONTROLS (ACTIVE BY DEFAULT) -->
+          <div class="launch-options orbit-options" id="orbitOptions">
+            <div class="range-field">
+              <div class="range-label">
+                <span>Orbit Shape / Eccentricity</span>
+                <output id="eccentricityValue">0.00 (Circle)</output>
+              </div>
+              <input id="eccentricity" type="range" min="0" max="80" value="0" />
+            </div>
+            <p class="option-help">0.00 is a circular orbit. Higher values stretch the orbit into an elongated ellipse.</p>
+
+            <label class="stacked-field">Orbit Direction
+              <select id="orbitDirection">
+                <option value="prograde">Prograde (Counter-Clockwise)</option>
+                <option value="retrograde">Retrograde (Clockwise)</option>
+              </select>
+            </label>
+
+            <div class="orbit-readout">
+              <small>ORBITAL PREVIEW</small>
+              <strong id="orbitDistanceValue">Move mouse to position orbit</strong>
+              <span id="orbitRangeValue">Click anywhere on screen to spawn immediately!</span>
+            </div>
+          </div>
+
+          <!-- IMPACT OPTIONS (SHOWN WHEN IMPACT MODE ACTIVE) -->
+          <div class="launch-options" id="impactOptions" hidden>
             <label class="range-field"><div class="range-label"><span>Impact speed</span><output id="impactSpeedValue">Medium</output></div><input id="impactSpeed" type="range" min="1" max="3" value="2" /></label>
+            <p class="option-help">Click and drag on any body to launch an impactor directly at it!</p>
           </div>
-          <div class="launch-options orbit-options" id="orbitOptions" hidden>
-            <label class="range-field"><div class="range-label"><span>Accentuary / Eccentricity</span><output id="eccentricityValue">0.00</output></div><input id="eccentricity" type="range" min="0" max="80" value="0" /></label>
-            <p class="option-help">0 is circular. Higher values bring the object close at periapsis and far away at apoapsis.</p>
-            <label class="stacked-field">Orbit direction<select id="orbitDirection"><option value="prograde">Prograde</option><option value="retrograde">Retrograde</option></select></label>
-            <div class="orbit-readout"><small>ORBIT DISTANCE</small><strong id="orbitDistanceValue">Move the mouse to choose</strong><span id="orbitRangeValue">Periapsis and apoapsis will appear on the canvas.</span></div>
+
+          <!-- LIFE LIKELIHOOD & ASTROBIOLOGY GUESSER -->
+          <div id="launcherLifeCard" style="margin-top: 14px; padding: 14px; background: rgba(14, 25, 44, 0.85); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong style="color: #34d399; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;">🧬 LIFE LIKELIHOOD GUESSER</strong>
+              <span id="launcherLifeScore" style="font-size: 13px; font-weight: 800; color: #34d399;">--%</span>
+            </div>
+            <div style="height: 6px; width: 100%; background: rgba(15, 23, 42, 0.8); border-radius: 3px; overflow: hidden; margin-bottom: 10px;">
+              <div id="launcherLifeBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #ef4444, #f59e0b, #10b981); transition: width 0.2s ease;"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+              <div><small style="color: #94a3b8; font-size: 9px; display: block;">ZONE</small><strong id="launcherLifeZone" style="color: #cbd5e1;">--</strong></div>
+              <div><small style="color: #94a3b8; font-size: 9px; display: block;">EST. TEMP</small><strong id="launcherLifeTemp" style="color: #cbd5e1;">--</strong></div>
+            </div>
+            <p id="launcherLifeVerdict" style="font-size: 10px; color: #93c5fd; margin-top: 8px; line-height: 1.4; border-top: 1px solid rgba(132, 169, 224, 0.15); padding-top: 6px;">
+              Move mouse on canvas to analyze astrobiological potential for this placement.
+            </p>
           </div>
-          <button class="launch-button" id="launchAtTarget" disabled><span>➤</span> Launch at selected target</button>
-          <p class="launch-note" id="launchNote">The object spawns just outside the target's orbit and automatically aims toward it.</p>
+
+          <p class="launch-note" id="launchNote" style="margin-top: 14px; font-weight: 600; color: #38bdf8; text-align: center;">
+            ✦ Move mouse on canvas to position orbit · Click anywhere to spawn!
+          </p>
         </aside>
       </main>
     </div>
@@ -411,6 +537,6 @@
     </dialog>
 
     <script src="space-visuals.js?v=20260905"></script>
-    <script src="app.js?v=20260905"></script>
+    <script src="app.js?v=20260905_v7"></script>
   </body>
 </html>
