@@ -34,6 +34,18 @@
   const milkyWayPhoto = new Image();
   milkyWayPhoto.decoding = "async";
   milkyWayPhoto.src = "assets/nasa/milky-way-1920.jpg";
+  const asteroidBeltParticles = Array.from({ length: 260 }, (_, index) => {
+    const seed = (index * 9301 + 49297) % 233280;
+    const random = seed / 233280;
+    return {
+      distance: 2.15 + random * 1.2,
+      angle: random * Math.PI * 2,
+      speed: .002 + (index % 7) * .00035,
+      size: .45 + (index % 5) * .22,
+      alpha: .28 + (index % 6) * .07,
+      color: index % 9 === 0 ? "#d9c29b" : "#9b8d7b",
+    };
+  });
 
   const SoundEngine = (() => {
     let ctx = null;
@@ -427,6 +439,7 @@ return {
       atmoHaze: data.atmoHaze !== undefined ? data.atmoHaze : 60,
       scienceType: data.scienceType || (data.texture === "sun" ? "star" : data.texture === "ice" ? "ice" : "rock"),
       science: data.science || scienceByName[data.name] || null,
+      impactHotspots: data.impactHotspots ? data.impactHotspots.map((spot) => ({ ...spot })) : [],
       parentId: data.parentId || null,
       isMoon: Boolean(data.isMoon),
       isBlackHole: Boolean(data.isBlackHole || data.scienceType === "blackHole" || data.texture === "blackHole"),
@@ -1133,6 +1146,7 @@ function integrate(dt) {
 
     if (primary.texture === "sun" || primary.scienceType === "star" || primary.isBlackHole) {
       spawnImpactEffect(a, b, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      addImpactHotspot(primary, impactor, Math.min(1.2, .35 + relativeSpeedKmS * .025));
       mergeBodies(a, b, `${primary.isBlackHole ? "BLACK HOLE TIDAL DISRUPTION" : "STELLAR ENGULFMENT"}: ${primary.name} completely consumed ${impactor.name}!`);
       return;
     }
@@ -1156,6 +1170,7 @@ function integrate(dt) {
     }
 
     spawnImpactEffect(a, b, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    addImpactHotspot(primary, impactor, Math.min(1.2, .35 + relativeSpeedKmS * .025));
     mergeBodies(a, b, message);
   }
 
@@ -1233,6 +1248,7 @@ function integrate(dt) {
 
     survivor.vx = comVx - (sumEjectaMomX / coreMass);
     survivor.vy = comVy - (sumEjectaMomY / coreMass);
+    addImpactHotspot(survivor, destroyed, Math.min(1.2, .45 + vEsc * .08));
 
     state.bodies.splice(state.bodies.indexOf(destroyed), 1);
     for (const frag of newFragments) {
@@ -1336,6 +1352,41 @@ function integrate(dt) {
     }
     if (state.effects.length > 320) state.effects.splice(0, state.effects.length - 320);
     SoundEngine.playImpact(intensity);
+  }
+
+  function addImpactHotspot(target, source, intensity) {
+    if (!target || target.isBlackHole || target.texture === "blackHole") return;
+    const angle = Math.atan2(source.y - target.y, source.x - target.x);
+    target.impactHotspots ||= [];
+    target.impactHotspots.push({ angle, strength: clamp(intensity, .25, 1), life: 14, maxLife: 14 });
+    if (target.impactHotspots.length > 5) target.impactHotspots.shift();
+  }
+
+  function drawImpactHotspots(body, radius) {
+    const spots = body.impactHotspots || [];
+    if (!spots.length || radius < 1) return;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.clip();
+    ctx.globalCompositeOperation = "screen";
+    for (const spot of spots) {
+      const alpha = clamp(spot.life / spot.maxLife, 0, 1);
+      const x = Math.cos(spot.angle) * radius * .66;
+      const y = Math.sin(spot.angle) * radius * .66;
+      const spread = radius * (.24 + .14 * spot.strength);
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, spread);
+      glow.addColorStop(0, `rgba(255,248,194,${.95 * alpha})`);
+      glow.addColorStop(.22, `rgba(255,112,35,${.8 * alpha})`);
+      glow.addColorStop(.62, `rgba(194,36,18,${.34 * alpha})`);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.ellipse(x, y, spread, spread * .62, spot.angle, 0, Math.PI * 2); ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = `rgba(255,194,100,${.55 * alpha})`;
+      ctx.lineWidth = Math.max(1, radius * .02);
+      ctx.beginPath(); ctx.arc(x, y, spread * .42, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalCompositeOperation = "screen";
+    }
+    ctx.restore();
   }
 
   function resolveTidalDisruptions(dt) {
@@ -1532,6 +1583,10 @@ function integrate(dt) {
   }
 
 function updateEffects(realSeconds) {
+    for (const body of state.bodies) {
+      for (const hotspot of body.impactHotspots || []) hotspot.life -= realSeconds;
+      body.impactHotspots = (body.impactHotspots || []).filter((hotspot) => hotspot.life > 0);
+    }
     for (const effect of state.effects) {
       effect.life -= realSeconds;
       if (effect.kind === "plasmaStream") {
@@ -2255,6 +2310,25 @@ function openSolarFlareLauncher() {
     };
   }
 
+function drawAsteroidBelt() {
+    const star = state.bodies.find((body) => body.texture === "sun" || body.scienceType === "star");
+    if (!star) return;
+    const elapsed = performance.now() * .001;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (const asteroid of asteroidBeltParticles) {
+      const angle = asteroid.angle + elapsed * asteroid.speed;
+      const worldX = star.x + Math.cos(angle) * asteroid.distance;
+      const worldY = star.y + Math.sin(angle) * asteroid.distance * .62;
+      const point = worldToScreen(worldX, worldY);
+      if (point.x < -5 || point.x > state.viewport.width + 5 || point.y < -5 || point.y > state.viewport.height + 5) continue;
+      ctx.fillStyle = asteroid.color;
+      ctx.globalAlpha = asteroid.alpha;
+      ctx.beginPath(); ctx.arc(point.x, point.y, Math.max(.45, asteroid.size * state.camera.zoom * .018), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
 function drawOrbitGuides() {
     if (!state.showOrbits) return;
     for (const body of state.bodies) {
@@ -2701,6 +2775,7 @@ function drawMagnetosphere(body, radius) {
       ctx.beginPath(); ctx.arc(0, 0, radius * 3.5, 0, Math.PI * 2); ctx.fill();
 
       drawSolarProminences(body, radius);
+      drawImpactHotspots(body, radius);
       ctx.restore();
       if (state.showVelocity) drawVelocity(body, p);
       return;
@@ -2709,6 +2784,7 @@ function drawMagnetosphere(body, radius) {
     if (body.texture === "sun" || body.scienceType === "star") {
       SpaceVisuals.star(ctx, radius, body.color, body.id || 1);
       drawSolarProminences(body, radius);
+      drawImpactHotspots(body, radius);
       if (state.selectedId === body.id) {
         ctx.strokeStyle = 'rgba(190,220,255,.75)';
         ctx.lineWidth = 1;
@@ -2833,6 +2909,7 @@ function drawMagnetosphere(body, radius) {
       ctx.fill();
     }
 
+    drawImpactHotspots(body, radius);
     drawSunlight(body, radius);
     ctx.restore();
     drawAtmosphereAndAurora(body, radius);
@@ -3581,6 +3658,7 @@ function drawMagnetosphere(body, radius) {
       drawGrid();
       drawEvolutionEffects();
       drawOrbitGuides();
+      drawAsteroidBelt();
       drawRocheZones();
       drawTrails();
       drawStellarAccretionStreams();
