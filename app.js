@@ -1619,8 +1619,9 @@ if (!state.moonsEngaged || available < 3) {
     }
   }
 
-function updateEffects(realSeconds) {
+  function updateEffects(realSeconds) {
     for (const body of state.bodies) {
+      if (body.ring) body.ringAngle = (body.ringAngle || 0) + realSeconds * .55;
       for (const hotspot of body.impactHotspots || []) hotspot.life -= realSeconds;
       body.impactHotspots = (body.impactHotspots || []).filter((hotspot) => hotspot.life > 0);
     }
@@ -3756,8 +3757,7 @@ const hasCustomBands = body.bandCount && body.bandCount > 0;
 
   function drawRing(body, radius, behind) {
     ctx.save();
-    ctx.rotate(-.22);
-    ctx.scale(1, .34);
+    ctx.rotate((body.ringAngle || 0) - .22);
     const scale = body.ringScale ?? 1;
     for (let band = 0; band < 32; band++) {
       if (band === 22 || band === 23) continue; // Cassini-like gap.
@@ -3765,10 +3765,13 @@ const hasCustomBands = body.bandCount && body.bandCount > 0;
       const opacity = (behind ? .24 : .52) * (.6 + .4 * Math.sin(band * 1.7) ** 2);
       ctx.strokeStyle = `rgba(218,207,182,${opacity})`;
       ctx.lineWidth = Math.max(.35, radius * .025 * scale);
+      ctx.setLineDash([Math.max(2, radius * .12), Math.max(1.5, radius * .06)]);
+      ctx.lineDashOffset = -(body.ringAngle || 0) * radius * .8;
       ctx.beginPath();
       ctx.arc(0, 0, r, behind ? Math.PI : 0, behind ? Math.PI * 2 : Math.PI);
       ctx.stroke();
     }
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
