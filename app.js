@@ -4751,7 +4751,10 @@ function getHabitableZone(star, planetSpec = null) {
     
     // Choose host star or primary to orbit
     let primary = null;
-    if (state.selectedId) primary = state.bodies.find(b => b.id === state.selectedId);
+    // The launcher roster is the explicit target. Do not silently fall back
+    // to whichever body happened to be selected most recently.
+    if (state.launchTargetId != null) primary = state.bodies.find(b => b.id === state.launchTargetId);
+    if (!primary && state.selectedId) primary = state.bodies.find(b => b.id === state.selectedId);
     if (!primary) primary = findDominantGravityParent(worldX, worldY, spec.mass);
     
     let spawnX = worldX;
@@ -5201,6 +5204,10 @@ function toggleMoons(engage = !state.moonsEngaged) {
   function createLaunchedBody(start, end) {
     if (state.bodies.length >= MAX_BODIES) { toast(`Maximum of ${MAX_BODIES} bodies reached`); return; }
     const velocityScale = .8;
+    const target = state.bodies.find((body) => body.id === state.launchTargetId);
+    const aim = target && Math.hypot(target.x - start.x, target.y - start.y) > 1e-9
+      ? { x: target.x - start.x, y: target.y - start.y }
+      : { x: end.x - start.x, y: end.y - start.y };
     const body = makeBody({
       name: `New world ${state.idCounter}`,
       mass: .25,
@@ -5209,13 +5216,13 @@ function toggleMoons(engage = !state.moonsEngaged) {
       texture: "rock",
       x: start.x,
       y: start.y,
-      vx: (end.x - start.x) * velocityScale,
-      vy: (end.y - start.y) * velocityScale,
+      vx: aim.x * velocityScale,
+      vy: aim.y * velocityScale,
     });
     state.bodies.push(body);
     selectBody(body);
     toggleAddMode(false);
-    toast(`${body.name} launched`);
+    toast(target ? `${body.name} launched toward ${target.name}` : `${body.name} launched`);
   }
 
   function bindEvents() {
