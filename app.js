@@ -40,7 +40,7 @@
     return {
       distance: 2.15 + random * 1.2,
       angle: random * Math.PI * 2,
-      speed: .002 + (index % 7) * .00035,
+      speed: .018 + (index % 7) * .0035,
       size: .45 + (index % 5) * .22,
       alpha: .28 + (index % 6) * .07,
       color: index % 9 === 0 ? "#d9c29b" : "#9b8d7b",
@@ -2449,23 +2449,27 @@ function drawAsteroidBelt() {
     const elapsed = performance.now() * .001;
     ctx.save();
     ctx.globalCompositeOperation = "screen";
-    // A restrained guide ellipse keeps the belt legible when particles are
-    // sub-pixel at a distant zoom level.
+    // A restrained circular guide keeps the belt legible when particles are
+    // sub-pixel at a distant zoom level. Earlier builds squashed this into an
+    // ellipse, which made the asteroid belt look like an oval instead of a
+    // roughly circular belt around the Sun.
     const beltCenter = worldToScreen(star.x, star.y);
     const beltRadius = 2.72 * state.camera.zoom;
     if (beltRadius > 24) {
       ctx.strokeStyle = "rgba(188, 164, 126, .18)";
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 8]);
+      ctx.lineDashOffset = -elapsed * 18;
       ctx.beginPath();
-      ctx.ellipse(beltCenter.x, beltCenter.y, beltRadius, beltRadius * .62, 0, 0, Math.PI * 2);
+      ctx.arc(beltCenter.x, beltCenter.y, beltRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
     for (const asteroid of asteroidBeltParticles) {
       const angle = asteroid.angle + elapsed * asteroid.speed;
-      const worldX = star.x + Math.cos(angle) * asteroid.distance;
-      const worldY = star.y + Math.sin(angle) * asteroid.distance * .62;
+      const breathing = 1 + Math.sin(elapsed * asteroid.speed * 2.3 + asteroid.angle) * .015;
+      const worldX = star.x + Math.cos(angle) * asteroid.distance * breathing;
+      const worldY = star.y + Math.sin(angle) * asteroid.distance * breathing;
       const point = worldToScreen(worldX, worldY);
       if (point.x < -5 || point.x > state.viewport.width + 5 || point.y < -5 || point.y > state.viewport.height + 5) continue;
       ctx.fillStyle = asteroid.color;
@@ -2482,14 +2486,17 @@ function drawOrbitGuides() {
       const parent = state.bodies.find((candidate) => candidate.id === body.orbit.parentId);
       if (!parent) continue;
 
+      const liveOrbit = osculatingOrbit(body, parent);
+      const guideOrbit = liveOrbit && Number.isFinite(liveOrbit.a) && liveOrbit.e < .95 ? liveOrbit : body.orbit;
+
       if (body.isMoon) {
         // Moon orbit guide around parent planet
         const parentPoint = worldToScreen(parent.x, parent.y);
-        const a = body.orbit.a;
+        const a = guideOrbit.a;
         if (!Number.isFinite(a) || a <= 0 || a * state.camera.zoom < 2) continue;
-        const e = clamp(body.orbit.e || 0, 0, 0.88);
+        const e = clamp(guideOrbit.e || 0, 0, 0.88);
         const b = a * Math.sqrt(1 - e * e);
-        const angle = body.orbit.angle || 0;
+        const angle = guideOrbit.angle || 0;
         const center = worldToScreen(parent.x - Math.cos(angle) * a * e, parent.y - Math.sin(angle) * a * e);
 
         ctx.save();
@@ -2504,11 +2511,11 @@ function drawOrbitGuides() {
       }
 
       // Primary Planet orbit guide around the Sun (drawn from true Keplerian elements)
-      const a = body.orbit.a;
+      const a = guideOrbit.a;
       if (!Number.isFinite(a) || a <= 0 || a * state.camera.zoom < 3) continue;
-      const e = clamp(body.orbit.e || 0, 0, 0.88);
+      const e = clamp(guideOrbit.e || 0, 0, 0.88);
       const b = a * Math.sqrt(1 - e * e);
-      const angle = body.orbit.angle || 0;
+      const angle = guideOrbit.angle || 0;
       const center = worldToScreen(parent.x - Math.cos(angle) * a * e, parent.y - Math.sin(angle) * a * e);
 
       ctx.save();
