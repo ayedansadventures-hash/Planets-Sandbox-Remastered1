@@ -1129,6 +1129,12 @@ function integrate(dt) {
     state.bodies.forEach((body, i) => {
       body.vx += second[i].x * dt * .5;
       body.vy += second[i].y * dt * .5;
+      // A malformed impactor should never poison the whole frame loop. Keep
+      // the last finite position/velocity and let the next step recover.
+      if (!Number.isFinite(body.x)) body.x = Number.isFinite(body.prevX) ? body.prevX : 0;
+      if (!Number.isFinite(body.y)) body.y = Number.isFinite(body.prevY) ? body.prevY : 0;
+      if (!Number.isFinite(body.vx)) body.vx = 0;
+      if (!Number.isFinite(body.vy)) body.vy = 0;
     });
     resolveCollisions();
     resolveTidalDisruptions(dt);
