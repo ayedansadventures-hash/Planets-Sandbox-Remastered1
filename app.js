@@ -34,13 +34,13 @@
   const milkyWayPhoto = new Image();
   milkyWayPhoto.decoding = "async";
   milkyWayPhoto.src = "assets/nasa/milky-way-1920.jpg";
-  const asteroidBeltParticles = Array.from({ length: 260 }, (_, index) => {
+  const asteroidBeltParticles = Array.from({ length: 420 }, (_, index) => {
     const seed = (index * 9301 + 49297) % 233280;
     const random = seed / 233280;
     return {
       distance: 2.15 + random * 1.2,
       angle: random * Math.PI * 2,
-      speed: .018 + (index % 7) * .0035,
+      speed: .022 + (index % 9) * .004,
       size: .45 + (index % 5) * .22,
       alpha: .28 + (index % 6) * .07,
       color: index % 9 === 0 ? "#d9c29b" : "#9b8d7b",
@@ -2465,16 +2465,22 @@ function drawAsteroidBelt() {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    for (const asteroid of asteroidBeltParticles) {
+    for (const [index, asteroid] of asteroidBeltParticles.entries()) {
       const angle = asteroid.angle + elapsed * asteroid.speed;
       const breathing = 1 + Math.sin(elapsed * asteroid.speed * 2.3 + asteroid.angle) * .015;
       const worldX = star.x + Math.cos(angle) * asteroid.distance * breathing;
       const worldY = star.y + Math.sin(angle) * asteroid.distance * breathing;
       const point = worldToScreen(worldX, worldY);
       if (point.x < -5 || point.x > state.viewport.width + 5 || point.y < -5 || point.y > state.viewport.height + 5) continue;
+      const twinkle = .82 + Math.sin(elapsed * 2.4 + asteroid.angle * 3) * .18;
       ctx.fillStyle = asteroid.color;
-      ctx.globalAlpha = Math.min(.95, asteroid.alpha + .12);
-      ctx.beginPath(); ctx.arc(point.x, point.y, Math.max(.6, asteroid.size * state.camera.zoom * .026), 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = Math.min(.95, (asteroid.alpha + .18) * twinkle);
+      const rockSize = Math.max(.75, asteroid.size * state.camera.zoom * .031);
+      ctx.beginPath(); ctx.arc(point.x, point.y, rockSize, 0, Math.PI * 2); ctx.fill();
+      if (index % 13 === 0) {
+        ctx.globalAlpha = Math.min(.45, asteroid.alpha * .8);
+        ctx.beginPath(); ctx.arc(point.x, point.y, rockSize * 2.6, 0, Math.PI * 2); ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -5345,7 +5351,9 @@ function toggleMoons(engage = !state.moonsEngaged) {
       state.pointer.worldY = world.y;
       if (state.addMode || isLauncherOpen) state.launchStart = world;
       else {
-        state.followBodyId = null;
+        const pressedBody = bodyAt(event.offsetX, event.offsetY);
+        state.pointer.followAnchorDrag = Boolean(state.followBodyId && pressedBody?.id === state.followBodyId);
+        if (!state.pointer.followAnchorDrag) state.followBodyId = null;
         canvas.classList.add("dragging");
       }
     });
@@ -5366,7 +5374,7 @@ function toggleMoons(engage = !state.moonsEngaged) {
       const dy = event.offsetY - state.pointer.downY;
       if (Math.hypot(dx, dy) > 6) state.pointer.moved = true;
       const isLauncherOpen = Boolean(ui.launchPanel && ui.launchPanel.classList && ui.launchPanel.classList.contains("open"));
-      if (state.pointer.dragging && !state.addMode && !isLauncherOpen) {
+      if (state.pointer.dragging && !state.addMode && !isLauncherOpen && !state.pointer.followAnchorDrag) {
         const moveDx = event.offsetX - (state.pointer.lastX ?? event.offsetX);
         const moveDy = event.offsetY - (state.pointer.lastY ?? event.offsetY);
         state.followBodyId = null;
@@ -5402,6 +5410,7 @@ function toggleMoons(engage = !state.moonsEngaged) {
         selectBody(bodyAt(event.offsetX, event.offsetY));
       }
       state.pointer.dragging = false;
+      state.pointer.followAnchorDrag = false;
       state.launchStart = null;
       canvas.classList.remove("dragging");
     });
